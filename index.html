@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Purple's RP</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="layout">
+
+    <!-- RAIL -->
+    <nav class="rail">
+      <div class="rail-logo" id="railLogo" title="Purple's RP"><i class="fa-solid fa-masks-theater"></i></div>
+      <button class="rail-btn active" data-drawer="chats" title="Chats"><i class="fa-solid fa-comments"></i></button>
+      <button class="rail-btn" data-drawer="chars" title="Characters"><i class="fa-solid fa-masks-theater"></i><span class="dot" id="charDot"></span></button>
+      <button class="rail-btn" data-drawer="images" title="Images"><i class="fa-solid fa-images"></i></button>
+      <button class="rail-btn" data-drawer="lore" title="Lore"><i class="fa-solid fa-book"></i></button>
+      <div class="rail-spacer"></div>
+      <div class="rail-foot">
+        <button class="rail-btn" id="settingsBtn" title="Settings"><i class="fa-solid fa-gear"></i></button>
+        <button class="rail-btn" data-drawer="account" title="Account"><i class="fa-solid fa-circle-user"></i></button>
+      </div>
+    </nav>
+
+    <!-- DRAWER -->
+    <aside class="drawer" id="drawer">
+      <div class="d-head">
+        <div class="d-title" id="dTitle"><i class="fa-solid fa-comments"></i>Chats</div>
+        <div class="d-head-right">
+          <button class="iconbtn" id="importBtn" title="Import character card"><i class="fa-solid fa-file-import"></i></button>
+          <button class="iconbtn create" id="createBtn" title="Create"><i class="fa-solid fa-plus"></i></button>
+          <button class="iconbtn" id="drawerMenu" title="More"><i class="fa-solid fa-ellipsis"></i></button>
+        </div>
+      </div>
+      <div class="d-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dSearch" placeholder="Search…" autocomplete="off"></div>
+      <div class="d-list" id="dList"></div>
+      <button class="d-collapse" id="dCollapse" title="Collapse panel"><i class="fa-solid fa-angles-left"></i></button>
+    </aside>
+
+    <!-- MAIN / CHAT -->
+    <main class="main">
+      <div class="topbar">
+        <div class="top-title" id="topTitle">
+          <div class="av" id="chatAvatar" style="background:linear-gradient(135deg,#8b5cf6,#d946ef)">+</div>
+          <div>
+            <div class="t-name" id="chatName">No chat open</div>
+            <div class="t-sub" id="chatSub">Create or open a chat to begin</div>
+          </div>
+        </div>
+        <div class="top-right">
+          <div class="model-pick" id="modelPick" title="Chat model">
+            <select id="modelSelect" class="select"></select>
+            <button class="iconbtn" id="modelRefresh" title="Refresh model list"><i class="fa-solid fa-rotate"></i></button>
+          </div>
+          <button class="iconbtn" id="imgBtn" title="Generate image (coming soon)"><i class="fa-solid fa-image"></i></button>
+          <button class="iconbtn toggled" id="ctxToggle" title="Toggle context panel"><i class="fa-solid fa-table-columns"></i></button>
+        </div>
+      </div>
+
+      <div class="msgs" id="msgs">
+        <div class="msgs-inner" id="msgsInner">
+          <div class="empty" id="emptyState">
+            <p>Send a message to start a roleplay. Adjust your provider and model in Settings.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="comp-box">
+          <textarea id="input" rows="2" placeholder="Write your reply…  (Enter to send, Shift+Enter for a new line)" autocomplete="off"></textarea>
+          <div class="comp-tools">
+            <button class="iconbtn" id="helpWrite" title="Help me write (coming soon)"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+            <button class="iconbtn" id="attachBtn" title="Attach image"><i class="fa-solid fa-paperclip"></i></button>
+            <button class="send" id="sendBtn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+            <button class="send stop" id="stopBtn" title="Stop generating" style="display:none"><i class="fa-solid fa-stop"></i></button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- CONTEXT PANEL -->
+    <div class="ctxwrap" id="ctxwrap">
+      <div class="ctx" id="ctx"></div>
+    </div>
+
+  </div>
+
+  <input type="file" id="importInput" accept=".png,.json,image/png,application/json" multiple style="display:none">
+  <div class="drop-overlay" id="dropOverlay"><div class="drop-inner"><i class="fa-solid fa-file-import"></i><p>Drop character cards to import</p></div></div>
+
+  <!-- GATE -->
+  <div class="modal-overlay" id="gateOverlay" style="display:none">
+    <div class="modal gate">
+      <div class="modal-body">
+        <div class="gate-inner">
+          <div class="gate-icon"><i class="fa-solid fa-masks-theater"></i></div>
+          <h2>Purple's RP</h2>
+          <h3 class="gate-sub">Adult content notice</h3>
+          <p>Purple's RP can generate uncensored adult roleplay and imagery, including explicit 18+ content. By continuing you confirm that you are at least 18 years old and that viewing this content is legal in your jurisdiction.</p>
+          <div class="modal-actions center">
+            <button class="btn primary" id="gateYes"><i class="fa-solid fa-check"></i> I am 18 or older</button>
+            <button class="btn ghost" id="gateNo">I am not 18</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/settings.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/provider.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/import.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/nova-images.js"></script>
+  <script src="js/seed.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

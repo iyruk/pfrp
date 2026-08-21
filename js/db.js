@@ -1,10 +1,10 @@
 "use strict";
 
 const DB_NAME = "pfrp";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const DB_STORES = {
-  characters: "++id, &name, folderPath, createdAt, updatedAt",
+  characters: "++id, name, folderPath, createdAt, updatedAt",
   threads: "++id, name, characterId, folderPath, createdAt, updatedAt, lastMessageTime",
   messages: "++id, &[threadId+order], threadId, characterId, order, creationTime",
   memories: "++id, threadId, type, index",
@@ -28,7 +28,13 @@ function createStoreIndexes(store, schema) {
     const fields = isCompound ? spec.slice(1, -1).split("+").map((s) => s.trim()) : [spec];
     const keyPath = isCompound ? fields : fields[0];
     const indexName = isCompound ? fields.join("+") : fields[0];
-    if (!store.indexNames.contains(indexName)) {
+    if (store.indexNames.contains(indexName)) {
+      const existing = store.index(indexName);
+      if (existing.unique !== unique) {
+        store.deleteIndex(indexName);
+        store.createIndex(indexName, keyPath, { unique });
+      }
+    } else {
       store.createIndex(indexName, keyPath, { unique });
     }
   }

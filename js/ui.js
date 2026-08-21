@@ -68,6 +68,7 @@ const UI = {
     const body = UI.el("div", "modal-body");
     body.appendChild(contentEl);
     modal.appendChild(body);
+    contentEl.querySelectorAll(".modal-actions").forEach((row) => modal.appendChild(row));
     overlay.appendChild(modal);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) overlay.remove();
@@ -76,10 +77,11 @@ const UI = {
     return overlay;
   },
 
-  confirmModal({ title = "Are you sure?", message = "", confirmText = "Confirm", danger = true }) {
+  confirmModal({ title = "Are you sure?", message = "", confirmText = "Confirm", danger = true, extra = null }) {
     return new Promise((resolve) => {
       const wrap = UI.el("div", "modal-body-stack");
       wrap.appendChild(UI.el("p", "modal-desc", message));
+      if (extra) wrap.appendChild(extra);
       const row = UI.el("div", "modal-actions");
       const cancel = UI.el("button", "btn ghost", "Cancel");
       const ok = UI.el("button", "btn " + (danger ? "danger" : "primary"), confirmText);

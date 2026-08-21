@@ -19,6 +19,12 @@ const PROVIDERS = {
     needsKey: false,
     defaultModel: "llama3.2",
   },
+  nanogpt: {
+    label: "NanoGPT",
+    baseUrl: "https://nano-gpt.com/api/v1",
+    needsKey: true,
+    defaultModel: "gpt-4o-mini",
+  },
 };
 
 const IMAGE_PROVIDERS = {
@@ -52,14 +58,41 @@ const IMAGE_SAFETY = [
 const STORE_KEY = "pfrp.settings.v1";
 const GATE_KEY = "pfrp.agreed.v1";
 
+const LEGACY_DEFAULT_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Always stay in character and never act or speak for the user — the user controls their own character completely.
+
+Write vivid, engaging prose in the style of quality fiction: rich sensory detail, natural dialogue, and in-character thoughts, feelings, and body language. Enclose actions and body language in *asterisks*.
+
+Match the tone, pacing, and length of the user's replies, and drive the scene forward with interesting choices and consequences. Respect the chat's configured content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.
+
+Never break character, never mention being an AI or a language model, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
+
+const LEGACY2_DEFAULT_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Your entire output is the scene itself: the characters' dialogue, their actions, and the world's description. Never write instructions to yourself, never describe or explain your own behavior, and never reveal an AI's thought process or reasoning. The user controls their own character completely; never act or speak for them.
+
+Write vivid, engaging prose in the style of quality fiction: rich sensory detail, natural dialogue, and in-character thoughts, feelings, and body language. Use *asterisks* ONLY to enclose actions and body language (for example: *she smiles and steps closer*). Never use them for emphasis, and never wrap them around names or ordinary words. Spoken dialogue is plain text with no markers.
+
+Match the tone, pacing, and length of the user's replies, and drive the scene forward with interesting choices and consequences. Respect the chat's configured content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.
+
+Never break character, never mention being an AI or a language model, never narrate what you are doing, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
+
+const DEFAULT_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Your entire output is the scene itself: the characters' dialogue, their actions, and the world's description. Never write instructions to yourself, never describe or explain your own behavior, and never reveal an AI's thought process or reasoning. The user controls their own character completely; never act or speak for them.
+
+Write vivid, engaging prose in the style of quality fiction: rich sensory detail, natural dialogue, and in-character thoughts, feelings, and body language. Use *asterisks* to enclose actions and body language (for example: *she smiles and steps closer*). They may also be used sparingly for emphasis, but never wrap them around names or ordinary words. Spoken dialogue is plain text with no markers.
+
+Match the tone, pacing, and length of the user's replies, and drive the scene forward with interesting choices and consequences. Respect the chat's configured content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.
+
+Never break character, never mention being an AI or a language model, never narrate what you are doing, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
+
 const DEFAULT_SETTINGS = {
   version: 1,
   provider: "openrouter",
   baseUrl: "",
   apiKey: "",
   model: "",
-  system: "",
+  connections: [],
+  activeConnection: "",
+  system: DEFAULT_SYSTEM_PROMPT,
   temperature: 1.0,
+  responseLength: "",
   nsfw: {
     chatDefault: "explicit",
     imageSafety: "explicit",
@@ -67,6 +100,7 @@ const DEFAULT_SETTINGS = {
   theme: "purple",
   themeCustom: "#a78bfa",
   dark: true,
+  avatarShape: "squircle",
   formatting: {
     default: true,
     defaultColor: "",
@@ -79,6 +113,8 @@ const DEFAULT_SETTINGS = {
     thoughts: true,
     thoughtsChar: "`",
     thoughtsColor: "#fbbf24",
+    noEmDash: false,
+    spacing: true,
   },
   ui: {
     drawerOpen: true,
@@ -89,6 +125,12 @@ const DEFAULT_SETTINGS = {
   user: {
     name: "You",
     personaText: "",
+  },
+  personas: [],
+  activePersonaId: "",
+  loreBooks: [],
+  memory: {
+    autoSummarize: true,
   },
   images: {
     provider: "pollinations",
@@ -102,9 +144,53 @@ const DEFAULT_SETTINGS = {
 function loadSettings() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
-    return deepMerge(structuredClone(DEFAULT_SETTINGS), parsed);
+    const merged = deepMerge(structuredClone(DEFAULT_SETTINGS), parsed);
+    if (!merged.system || !merged.system.trim()) merged.system = DEFAULT_SYSTEM_PROMPT;
+    const sysTrim = merged.system.trim();
+    if (sysTrim === LEGACY_DEFAULT_SYSTEM_PROMPT.trim() || sysTrim === LEGACY2_DEFAULT_SYSTEM_PROMPT.trim()) {
+      merged.system = DEFAULT_SYSTEM_PROMPT;
+    }
+    migrateConnections(merged);
+    migratePersonas(merged);
+    return merged;
   } catch {
-    return structuredClone(DEFAULT_SETTINGS);
+    const fresh = structuredClone(DEFAULT_SETTINGS);
+    migrateConnections(fresh);
+    migratePersonas(fresh);
+    return fresh;
+  }
+}
+
+function migratePersonas(settings) {
+  if (!Array.isArray(settings.personas) || !settings.personas.length) {
+    settings.personas = [{
+      id: "default",
+      name: (settings.user && settings.user.name) || "You",
+      description: (settings.user && settings.user.personaText) || "",
+    }];
+  }
+  if (!settings.personas.some((p) => p.id === settings.activePersonaId)) {
+    settings.activePersonaId = settings.personas[0].id;
+  }
+}
+
+function migrateConnections(settings) {
+  if (!Array.isArray(settings.connections) || !settings.connections.length) {
+    const conn = {
+      id: "conn-" + Date.now().toString(36),
+      name: "Default",
+      provider: settings.provider || "openrouter",
+      baseUrl: settings.baseUrl || "",
+      apiKey: settings.apiKey || "",
+      model: settings.model || "",
+    };
+    settings.connections = [conn];
+  }
+  for (const c of settings.connections) {
+    if (!PROVIDERS[c.provider]) c.provider = "openrouter";
+  }
+  if (!settings.connections.some((c) => c.id === settings.activeConnection)) {
+    settings.activeConnection = settings.connections[0].id;
   }
 }
 
@@ -134,7 +220,19 @@ const Settings = {
   },
 
   getProvider() {
-    return PROVIDERS[this.data.provider] || PROVIDERS.openrouter;
+    return PROVIDERS[this.activeConnection().provider] || PROVIDERS.openrouter;
+  },
+
+  activeConnection() {
+    const s = this.data;
+    const conn = (s.connections || []).find((c) => c.id === s.activeConnection);
+    return conn || (s.connections && s.connections[0]) || { provider: "openrouter", baseUrl: "", apiKey: "", model: "" };
+  },
+
+  activePersona() {
+    const s = this.data;
+    const p = (s.personas || []).find((x) => x.id === s.activePersonaId);
+    return p || (s.personas && s.personas[0]) || null;
   },
 
   gatePassed() {
@@ -156,3 +254,4 @@ window.IMAGE_PROVIDERS = IMAGE_PROVIDERS;
 window.THEMES = THEMES;
 window.EXPLICITNESS = EXPLICITNESS;
 window.IMAGE_SAFETY = IMAGE_SAFETY;
+window.DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT;

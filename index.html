@@ -50,12 +50,8 @@
           </div>
         </div>
         <div class="top-right">
-          <div class="model-pick" id="modelPick" title="Chat model">
-            <select id="modelSelect" class="select"></select>
-            <button class="iconbtn" id="modelRefresh" title="Refresh model list"><i class="fa-solid fa-rotate"></i></button>
-          </div>
           <button class="iconbtn" id="imgBtn" title="Generate image (coming soon)"><i class="fa-solid fa-image"></i></button>
-          <button class="iconbtn toggled" id="ctxToggle" title="Toggle context panel"><i class="fa-solid fa-table-columns"></i></button>
+          <button class="iconbtn toggled" id="ctxToggle" title="Chat settings"><i class="fa-solid fa-sliders"></i></button>
         </div>
       </div>
 
@@ -67,10 +63,12 @@
         </div>
       </div>
 
-      <div class="composer">
+      <div class="composer" id="composer">
+        <div class="speaker-row" id="speakerRow"></div>
         <div class="comp-box">
           <textarea id="input" rows="2" placeholder="Write your reply…  (Enter to send, Shift+Enter for a new line)" autocomplete="off"></textarea>
           <div class="comp-tools">
+            <button class="iconbtn" id="guidedBtn" title="Guided: your text drafts the selected speaker's reply"><i class="fa-solid fa-feather"></i></button>
             <button class="iconbtn" id="helpWrite" title="Help me write (coming soon)"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
             <button class="iconbtn" id="attachBtn" title="Attach image"><i class="fa-solid fa-paperclip"></i></button>
             <button class="send" id="sendBtn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
@@ -90,18 +88,31 @@
   <input type="file" id="importInput" accept=".png,.json,image/png,application/json" multiple style="display:none">
   <div class="drop-overlay" id="dropOverlay"><div class="drop-inner"><i class="fa-solid fa-file-import"></i><p>Drop character cards to import</p></div></div>
 
-  <!-- GATE -->
-  <div class="modal-overlay" id="gateOverlay" style="display:none">
-    <div class="modal gate">
+  <!-- WELCOME / 18+ -->
+  <div class="modal-overlay" id="welcomeOverlay" style="display:none">
+    <div class="modal welcome">
       <div class="modal-body">
         <div class="gate-inner">
           <div class="gate-icon"><i class="fa-solid fa-masks-theater"></i></div>
-          <h2>Purple's RP</h2>
-          <h3 class="gate-sub">Adult content notice</h3>
-          <p>Purple's RP can generate uncensored adult roleplay and imagery, including explicit 18+ content. By continuing you confirm that you are at least 18 years old and that viewing this content is legal in your jurisdiction.</p>
+          <h2>Welcome to Purple's RP</h2>
+          <div class="welcome-features">
+            <p>Roleplay with AI characters  -  Individual or group chats, with a narrator for scene-setting and characters that talk among themselves.</p>
+            <p>Import character cards from SillyTavern, Agnai, or Perchance. Everything stays in your browser.</p>
+          </div>
+          <div class="welcome-persona">
+            <label class="field-label" for="welcomeName">What should we call you?</label>
+            <input id="welcomeName" class="input" type="text" placeholder="Your name">
+            <label class="field-label" for="welcomeDesc">Briefly describe yourself (optional)</label>
+            <textarea id="welcomeDesc" class="textarea" rows="3" placeholder="Who are you in these stories? Personality, style, anything the characters should know…"></textarea>
+            <div class="modal-actions">
+              <button class="btn ghost small" id="welcomeGen"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate with AI</button>
+            </div>
+            <div class="hint">The generator uses what you've written above as a guide. Leave the box empty and it will describe you on its own.</div>
+          </div>
+          <p class="hint">Purple's RP can generate uncensored adult content, including explicit 18+ roleplay and imagery. By continuing you confirm you are at least 18 and that viewing this content is legal where you are.</p>
           <div class="modal-actions center">
-            <button class="btn primary" id="gateYes"><i class="fa-solid fa-check"></i> I am 18 or older</button>
-            <button class="btn ghost" id="gateNo">I am not 18</button>
+            <button class="btn primary" id="welcomeContinue"><i class="fa-solid fa-check"></i> I am 18 or older  -  Continue</button>
+            <button class="btn ghost" id="welcomeRefuse">I am not 18</button>
           </div>
         </div>
       </div>
@@ -114,6 +125,7 @@
   <script src="js/ui.js"></script>
   <script src="js/import.js"></script>
   <script src="js/export.js"></script>
+  <script src="js/backup.js"></script>
   <script src="js/nova-images.js"></script>
   <script src="js/seed.js"></script>
   <script src="js/app.js"></script>

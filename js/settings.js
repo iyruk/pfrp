@@ -121,6 +121,7 @@ const DEFAULT_SETTINGS = {
     ctxOpen: false,
     lastDrawer: "chats",
     lastOpen: {},
+    ctxWidth: 310,
   },
   user: {
     name: "You",
@@ -129,6 +130,8 @@ const DEFAULT_SETTINGS = {
   personas: [],
   activePersonaId: "",
   loreBooks: [],
+  favoriteModels: [],
+  recentModels: [],
   memory: {
     autoSummarize: true,
   },

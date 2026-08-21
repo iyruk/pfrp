@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Purple's RP</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="style.css">
@@ -20,7 +20,6 @@
       <div class="rail-spacer"></div>
       <div class="rail-foot">
         <button class="rail-btn" id="settingsBtn" title="Settings"><i class="fa-solid fa-gear"></i></button>
-        <button class="rail-btn" data-drawer="account" title="Account"><i class="fa-solid fa-circle-user"></i></button>
       </div>
     </nav>
 
@@ -50,8 +49,7 @@
           </div>
         </div>
         <div class="top-right">
-          <button class="iconbtn" id="imgBtn" title="Generate image (coming soon)"><i class="fa-solid fa-image"></i></button>
-          <button class="iconbtn toggled" id="ctxToggle" title="Chat settings"><i class="fa-solid fa-sliders"></i></button>
+          <button class="iconbtn" id="ctxToggle" title="Chat settings"><i class="fa-solid fa-sliders"></i></button>
         </div>
       </div>
 
@@ -63,14 +61,14 @@
         </div>
       </div>
 
-      <div class="composer" id="composer">
+      <div class="composer" id="composer" style="display:none">
         <div class="speaker-row" id="speakerRow"></div>
         <div class="comp-box">
           <textarea id="input" rows="2" placeholder="Write your reply…  (Enter to send, Shift+Enter for a new line)" autocomplete="off"></textarea>
           <div class="comp-tools">
             <button class="iconbtn" id="guidedBtn" title="Guided: your text drafts the selected speaker's reply"><i class="fa-solid fa-feather"></i></button>
             <button class="iconbtn" id="helpWrite" title="Help me write (coming soon)"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
-            <button class="iconbtn" id="attachBtn" title="Attach image"><i class="fa-solid fa-paperclip"></i></button>
+            <button class="iconbtn" id="imgBtn" title="Generate an image for this chat"><i class="fa-solid fa-image"></i></button>
             <button class="send" id="sendBtn" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
             <button class="send stop" id="stopBtn" title="Stop generating" style="display:none"><i class="fa-solid fa-stop"></i></button>
           </div>
@@ -79,7 +77,7 @@
     </main>
 
     <!-- CONTEXT PANEL -->
-    <div class="ctxwrap" id="ctxwrap">
+    <div class="ctxwrap collapsed" id="ctxwrap">
       <div class="ctx" id="ctx"></div>
     </div>
 
@@ -118,6 +116,38 @@
       </div>
     </div>
   </div>
+
+  <script>
+  (function () {
+    try {
+      var saved = JSON.parse(localStorage.getItem("pfrp.settings.v1") || "{}");
+      var ui = saved.ui || {};
+      var d = ui.lastDrawer || "chats";
+      var map = {
+        chats: ["Chats", "comments"],
+        chars: ["Characters", "masks-theater"],
+        images: ["Images", "images"],
+        lore: ["Lore", "book"]
+      };
+      if (!map[d]) d = "chats";
+      document.querySelectorAll(".rail-btn[data-drawer]").forEach(function (b) {
+        b.classList.toggle("active", b.dataset.drawer === d);
+      });
+      var title = document.getElementById("dTitle");
+      if (title) title.innerHTML = '<i class="fa-solid fa-' + map[d][1] + '"></i>' + map[d][0];
+      if (d !== "chats") {
+        var ct = document.getElementById("ctxToggle");
+        var ib = document.getElementById("imgBtn");
+        if (ct) ct.style.display = "none";
+        if (ib) ib.style.display = "none";
+      }
+      if (ui.drawerOpen === false) {
+        var drawer = document.getElementById("drawer");
+        if (drawer) drawer.classList.add("collapsed");
+      }
+    } catch (e) {}
+  })();
+  </script>
 
   <script src="js/settings.js"></script>
   <script src="js/db.js"></script>

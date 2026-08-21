@@ -27,7 +27,6 @@ const els = {
   guidedBtn: $("guidedBtn"),
   sendBtn: $("sendBtn"),
   stopBtn: $("stopBtn"),
-  attachBtn: $("attachBtn"),
   helpWrite: $("helpWrite"),
   imgBtn: $("imgBtn"),
   ctxToggle: $("ctxToggle"),
@@ -63,6 +62,7 @@ let chatSort = "updated";
 let chatFolderFilter = "";
 let loreEntries = [];
 let imageRecords = [];
+let settingsShowTab = null;
 
 function isConverting(c) {
   return !!(c && c.converting);
@@ -74,6 +74,54 @@ function isGenerating(threadId) {
 
 function currentThreadModel() {
   return (activeThread && activeThread.modelName) || pfrpSettings.activeConnection().model;
+}
+
+function rememberModel(model) {
+  if (!model) return;
+  const s = pfrpSettings.data;
+  if (!Array.isArray(s.recentModels)) s.recentModels = [];
+  s.recentModels = s.recentModels.filter((r) => r.model !== model);
+  s.recentModels.unshift({ model, at: Date.now() });
+  s.recentModels = s.recentModels.slice(0, 8);
+  pfrpSettings.save();
+}
+
+function toggleFavoriteModel(model) {
+  if (!model) return false;
+  const s = pfrpSettings.data;
+  if (!Array.isArray(s.favoriteModels)) s.favoriteModels = [];
+  const i = s.favoriteModels.indexOf(model);
+  if (i >= 0) {
+    s.favoriteModels.splice(i, 1);
+    pfrpSettings.save();
+    return false;
+  }
+  s.favoriteModels.unshift(model);
+  pfrpSettings.save();
+  return true;
+}
+
+function isFavoriteModel(model) {
+  return !!model && (pfrpSettings.data.favoriteModels || []).includes(model);
+}
+
+function modelChipsRow(currentModel, onPick) {
+  const s = pfrpSettings.data;
+  const row = UI.el("div", "model-chips");
+  const favs = (s.favoriteModels || []).slice(0, 5);
+  const recents = (s.recentModels || [])
+    .map((r) => r.model)
+    .filter((m) => m !== currentModel && !favs.includes(m))
+    .slice(0, 5);
+  const add = (model, icon, title) => {
+    const chip = UI.el("button", "fchip", `${UI.fa(icon)} ${esc(model)}`);
+    chip.title = title;
+    chip.addEventListener("click", () => onPick(model));
+    row.appendChild(chip);
+  };
+  for (const m of favs) add(m, "star", "Favorite model - click to use");
+  for (const m of recents) add(m, "clock", "Recently used - click to use");
+  return row;
 }
 
 function invalidateModelCache() {
@@ -94,9 +142,21 @@ async function loadModelCache() {
 }
 
 function buildModelControl(t) {
+  const wrap = UI.el("div", "");
+  const current = (t && t.modelName) || pfrpSettings.activeConnection().model;
+  const pick = async (model) => {
+    if (!t) return;
+    t.modelName = model;
+    await pfrpDB.put("threads", t);
+    rememberModel(model);
+    renderContext();
+    UI.showToast("Model set to " + model);
+  };
+  const chips = modelChipsRow(current, pick);
+  wrap.appendChild(chips);
+
   const row = UI.el("div", "key-row");
   const sel = UI.el("select", "select");
-  const current = (t && t.modelName) || pfrpSettings.activeConnection().model;
   const options = new Set(modelCache);
   if (current) options.add(current);
   for (const id of options) {
@@ -107,7 +167,15 @@ function buildModelControl(t) {
     if (!t) return;
     t.modelName = sel.value;
     await pfrpDB.put("threads", t);
+    rememberModel(sel.value);
+    renderContext();
     UI.showToast("Model set to " + sel.value);
+  });
+  const starBtn = UI.el("button", "iconbtn" + (isFavoriteModel(current || "") ? " fav" : ""), UI.fa("star"));
+  starBtn.title = "Toggle favorite for the current model";
+  starBtn.addEventListener("click", () => {
+    toggleFavoriteModel(current || "");
+    renderContext();
   });
   const refresh = UI.el("button", "iconbtn", UI.fa("rotate"));
   refresh.title = "Refresh model list";
@@ -123,8 +191,9 @@ function buildModelControl(t) {
       if (activeThread === t) renderContext();
     });
   }
-  row.append(sel, refresh);
-  return row;
+  row.append(sel, starBtn, refresh);
+  wrap.appendChild(row);
+  return wrap;
 }
 
 /* ---------------- CROSS-TAB SYNC ---------------- */
@@ -267,7 +336,6 @@ const DRAWERS = {
   chars: { icon: "masks-theater", title: "Characters", build: renderCharsDrawer, create: "char", folders: "characters" },
   images: { icon: "images", title: "Images", build: renderImagesDrawer, create: "image" },
   lore: { icon: "book", title: "Lore", build: renderLoreDrawer, create: "lore" },
-  account: { icon: "circle-user", title: "Account", build: renderAccountDrawer, create: null },
 };
 
 function setDrawer(key) {
@@ -276,7 +344,8 @@ function setDrawer(key) {
   prevDrawer = key;
   activeDrawer = key;
   contextChar = null;
-  setCtx(false);
+  closeCtxPanelVisual();
+  els.ctxToggle.style.display = key === "chats" ? "" : "none";
   document.querySelectorAll(".rail-btn[data-drawer]").forEach((b) => {
     b.classList.toggle("active", b.dataset.drawer === key);
   });
@@ -291,6 +360,7 @@ function setDrawer(key) {
   pfrpSettings.save();
   openDrawer();
   if (changed) restoreDrawerSelection(key);
+  if (isMobileWidth()) setDrawerOpen(false);
 }
 
 function restoreDrawerSelection(key) {
@@ -326,6 +396,7 @@ function clearCenterSelection() {
 
 function setDrawerOpen(open) {
   els.drawer.classList.toggle("collapsed", !open);
+  els.drawer.classList.toggle("open", open);
   pfrpSettings.data.ui.drawerOpen = open;
   pfrpSettings.save();
   let pin = els.drawer._pin;
@@ -339,7 +410,7 @@ function setDrawerOpen(open) {
       pin = UI.el("button", "drawer-pin", UI.fa("angles-right"));
       pin.title = "Expand panel";
       pin.addEventListener("click", () => setDrawerOpen(true));
-      els.rail.appendChild(pin);
+      document.querySelector(".rail").appendChild(pin);
       els.drawer._pin = pin;
     }
   }
@@ -359,6 +430,10 @@ function avatarHtml(record, size = "") {
 }
 
 function userAvatarHtml() {
+  const persona = threadPersona(activeThread) || pfrpSettings.activePersona();
+  if (persona && persona.avatar) {
+    return `<div class="av"><img src="${persona.avatar}" alt=""></div>`;
+  }
   const u = pfrpSettings.data.user;
   const initial = (u.name ? u.name[0] : "U").toUpperCase();
   if (u.avatar) {
@@ -995,13 +1070,12 @@ async function summarizeNow(t) {
   renderContext();
 }
 
-function renderAccountDrawer() {
+function buildPersonasSettings() {
   const wrap = UI.el("div", "account-panel");
   const personas = pfrpSettings.data.personas || [];
   const activeId = pfrpSettings.data.activePersonaId;
 
-  wrap.appendChild(UI.el("div", "d-sec", "Your personas"));
-  wrap.appendChild(UI.el("div", "hint pad", "Personas tell the characters who you are. Pick one when starting a chat, or convert a character into a persona from its menu."));
+  wrap.appendChild(UI.el("div", "hint", "Personas tell the characters who you are. Pick one when starting a chat, or convert a character into a persona from its menu."));
 
   for (const p of personas) {
     const item = UI.el("div", "d-item persona-item" + (p.id === activeId ? " active" : ""));
@@ -1015,7 +1089,7 @@ function renderAccountDrawer() {
       e.stopPropagation();
       pfrpSettings.data.activePersonaId = p.id;
       pfrpSettings.save();
-      renderAccountDrawer();
+      if (settingsShowTab) settingsShowTab("personas");
       UI.showToast("Active persona: " + p.name);
     });
     const body = UI.el("div", "d-body");
@@ -1040,7 +1114,7 @@ function renderAccountDrawer() {
           pfrpSettings.data.personas = pfrpSettings.data.personas.filter((x) => x.id !== p.id);
           if (pfrpSettings.data.activePersonaId === p.id) pfrpSettings.data.activePersonaId = pfrpSettings.data.personas[0].id;
           pfrpSettings.save();
-          renderAccountDrawer();
+          if (settingsShowTab) settingsShowTab("personas");
           UI.showToast("Persona deleted");
         } },
       ]);
@@ -1052,9 +1126,7 @@ function renderAccountDrawer() {
   const addBtn = UI.el("button", "addbtn", UI.fa("plus") + " New persona");
   addBtn.addEventListener("click", () => editPersonaModal(null));
   wrap.appendChild(addBtn);
-
-  els.dList.innerHTML = "";
-  els.dList.appendChild(wrap);
+  return wrap;
 }
 
 function editPersonaModal(p) {
@@ -1064,14 +1136,15 @@ function editPersonaModal(p) {
   const head = UI.el("div", "dossier-head");
   const avatarG = UI.el("div", "form-group");
   avatarG.appendChild(UI.el("label", "field-label", "Profile image"));
-  const avatarRow = UI.el("div", "key-row");
+  const upLabel = UI.el("label", "avatar-upload");
   const avatarInput = UI.el("input", "input");
   avatarInput.type = "file";
   avatarInput.accept = "image/*";
   const avatarPreview = UI.el("div", "av", p && p.avatar ? "" : "A");
   if (p && p.avatar) avatarPreview.innerHTML = `<img src="${p.avatar}" alt="">`;
-  avatarRow.append(avatarInput, avatarPreview);
-  avatarG.appendChild(avatarRow);
+  avatarPreview.appendChild(UI.el("span", "avatar-edit", UI.fa("camera") + " <span>Change</span>"));
+  upLabel.append(avatarInput, avatarPreview);
+  avatarG.appendChild(upLabel);
   let avatarData = (p && p.avatar) || "";
   avatarInput.addEventListener("change", () => {
     const file = avatarInput.files[0];
@@ -1080,6 +1153,7 @@ function editPersonaModal(p) {
     reader.onload = () => {
       avatarData = reader.result;
       avatarPreview.innerHTML = `<img src="${avatarData}" alt="">`;
+      avatarPreview.appendChild(UI.el("span", "avatar-edit", UI.fa("camera") + " <span>Change</span>"));
     };
     reader.readAsDataURL(file);
   });
@@ -1137,7 +1211,7 @@ function editPersonaModal(p) {
     if (isNew) pfrpSettings.data.activePersonaId = record.id;
     pfrpSettings.save();
     overlay.remove();
-    renderAccountDrawer();
+    if (settingsShowTab) settingsShowTab("personas");
     UI.showToast(isNew ? "Persona created" : "Persona saved");
   });
   row.append(cancel, save);
@@ -1155,6 +1229,7 @@ function openSettingsModal() {
     { id: "conn", label: "Connection", icon: "plug", build: buildConnectionSettings },
     { id: "gen", label: "Generation", icon: "sliders", build: buildGenerationSettings },
     { id: "nsfw", label: "Content", icon: "shield-halved", build: buildNsfwSettings },
+    { id: "personas", label: "Personas", icon: "circle-user", build: buildPersonasSettings },
     { id: "img", label: "Images", icon: "images", build: buildImageSettings },
     { id: "fmt", label: "Formatting", icon: "font", build: buildFormattingSettings },
     { id: "app", label: "Appearance", icon: "palette", build: buildThemeSettings },
@@ -1170,6 +1245,7 @@ function openSettingsModal() {
     footer.style.display = footer.children.length ? "" : "none";
     tabbar.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.id === id));
   }
+  settingsShowTab = show;
 
   for (const c of cats) {
     const b = UI.el("button", "", `${UI.fa(c.icon)} ${c.label}`);
@@ -1260,6 +1336,8 @@ function buildConnectionSettings() {
 
   const modelWrap = UI.el("div", "form-group");
   modelWrap.appendChild(UI.el("label", "field-label", "Model"));
+  const modelChips = UI.el("div", "");
+  modelWrap.appendChild(modelChips);
   const modelRow = UI.el("div", "key-row");
   const modelSel = UI.el("select", "select");
   const customModel = UI.el("input", "input");
@@ -1267,7 +1345,31 @@ function buildConnectionSettings() {
   customModel.placeholder = "Enter custom model ID…";
   customModel.style.display = "none";
   const fetchBtn = UI.el("button", "", UI.fa("cloud-arrow-down") + " Fetch");
-  modelRow.append(modelSel, fetchBtn);
+  const starModel = UI.el("button", "iconbtn", UI.fa("star"));
+  starModel.title = "Toggle favorite for the selected model";
+  const currentConnModel = () => (modelSel.value === "__custom__" ? customModel.value.trim() : modelSel.value);
+  starModel.addEventListener("click", () => {
+    toggleFavoriteModel(currentConnModel());
+    loadConn();
+  });
+  const renderModelChips = () => {
+    modelChips.innerHTML = "";
+    const chips = modelChipsRow(currentConnModel(), (m) => {
+      if (new Set(modelCache).has(m)) {
+        modelSel.value = m;
+        customModel.style.display = "none";
+        customModel.value = "";
+      } else {
+        modelSel.value = "__custom__";
+        customModel.style.display = "";
+        customModel.value = m;
+      }
+      renderModelChips();
+      starModel.classList.toggle("fav", isFavoriteModel(m));
+    });
+    modelChips.appendChild(chips);
+  };
+  modelRow.append(modelSel, starModel, fetchBtn);
   modelWrap.appendChild(modelRow);
   modelWrap.appendChild(customModel);
   wrap.appendChild(modelWrap);
@@ -1298,6 +1400,8 @@ function buildConnectionSettings() {
       customModel.style.display = "none";
       customModel.value = "";
     }
+    renderModelChips();
+    starModel.classList.toggle("fav", isFavoriteModel(currentConnModel()));
   }
 
   modelSel.addEventListener("change", () => {
@@ -2374,6 +2478,7 @@ function openCharacterEditor(c = {}) {
   const tabDefs = [
     { id: "details", icon: "align-left", label: "Details" },
     { id: "chat", icon: "comments", label: "Chat" },
+    { id: "media", icon: "images", label: "Media" },
   ];
   let activeTab = "details";
 
@@ -2382,6 +2487,51 @@ function openCharacterEditor(c = {}) {
   const gAppear = f("Appearance", "How they look (optional)", c.appearance, "textarea", true);
   const gPersonality = f("Personality", "Short trait list, e.g. caring, protective, witty", c.personality, "textarea", true);
   const gScenario = f("Scenario", "Setting / situation", c.scenario, "textarea", true);
+
+  const photosG = UI.el("div", "form-group");
+  photosG.appendChild(UI.el("label", "field-label", "Photos"));
+  const photosRow = UI.el("div", "photos-row");
+  let photoList = (c.photos || []).map((p) => (typeof p === "string" ? { url: p } : p)).slice();
+  const renderPhotos = () => {
+    photosRow.innerHTML = "";
+    for (let i = 0; i < photoList.length; i++) {
+      const cell = UI.el("div", "photo-cell");
+      const img = UI.el("img", "");
+      img.src = photoList[i].url || "";
+      cell.appendChild(img);
+      const rm = UI.el("button", "photo-rm", UI.fa("xmark"));
+      rm.title = "Remove photo";
+      rm.addEventListener("click", () => {
+        photoList.splice(i, 1);
+        renderPhotos();
+      });
+      cell.appendChild(rm);
+      photosRow.appendChild(cell);
+    }
+    const addLabel = UI.el("label", "photo-cell add", UI.fa("plus"));
+    const addInput = UI.el("input", "");
+    addInput.type = "file";
+    addInput.accept = "image/*";
+    addInput.multiple = true;
+    addInput.style.display = "none";
+    addLabel.appendChild(addInput);
+    addLabel.title = "Add photos (jpg, png, gif)";
+    addInput.addEventListener("change", () => {
+      for (const file of addInput.files) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          photoList.push({ url: reader.result });
+          renderPhotos();
+        };
+        reader.readAsDataURL(file);
+      }
+      addInput.value = "";
+    });
+    photosRow.appendChild(addLabel);
+  };
+  renderPhotos();
+  photosG.appendChild(photosRow);
+  photosG.appendChild(UI.el("div", "hint", "Extra pictures of this character. From the character view you can set one as the avatar."));
 
   const nsfwG = UI.el("div", "form-group");
   nsfwG.appendChild(UI.el("label", "field-label", "Explicitness"));
@@ -2423,12 +2573,14 @@ function openCharacterEditor(c = {}) {
   detailsBody.append(gDesc.g, gAppear.g, gPersonality.g, gScenario.g, nsfwG);
   const chatBody = UI.el("div", "");
   chatBody.append(gFirst.g, gExample.g, gAlt.g, gSystem.g, gPost.g);
+  const mediaBody = UI.el("div", "");
+  mediaBody.append(photosG);
 
   function showTab(id) {
     activeTab = id;
     tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === id));
     tabBody.innerHTML = "";
-    tabBody.appendChild(id === "details" ? detailsBody : chatBody);
+    tabBody.appendChild(id === "details" ? detailsBody : id === "chat" ? chatBody : mediaBody);
   }
 
   for (const td of tabDefs) {
@@ -2461,6 +2613,7 @@ function openCharacterEditor(c = {}) {
       post_history_instructions: gPost.el.value.trim(),
       explicitness: state._explicitness,
       avatar: avatarData,
+      photos: photoList,
       updatedAt: Date.now(),
     });
     if (isNew) {
@@ -3043,7 +3196,7 @@ async function openThread(id, silent = false) {
   activeThread = t;
   activeCharacter = null;
   contextChar = null;
-  setCtx(false);
+  closeCtxPanelVisual();
   const all = await pfrpDB.byIndex("messages", "threadId", id);
   activeMessages = all.sort((a, b) => a.order - b.order);
   const live = streams.get(id);
@@ -3133,7 +3286,7 @@ function viewCharacter(id) {
   activeThread = null;
   activeMessages = [];
   contextChar = null;
-  setCtx(false);
+  closeCtxPanelVisual();
   setDrawerOpen(true);
   pfrpSettings.data.ui.lastOpen = pfrpSettings.data.ui.lastOpen || {};
   pfrpSettings.data.ui.lastOpen.chars = id;
@@ -3173,8 +3326,30 @@ function renderCharacterView(c) {
   actions.append(start, edit, exp);
   view.appendChild(actions);
 
+  if (c.photos && c.photos.length) {
+    const photoWrap = UI.el("div", "char-view-photos");
+    const toggle = UI.el("button", "btn ghost small", `${UI.fa("images")} Photos (${c.photos.length})`);
+    toggle.addEventListener("click", () => {
+      const open = photoWrap.classList.toggle("open");
+      toggle.innerHTML = (open ? UI.fa("angle-up") : UI.fa("images")) + ` Photos (${c.photos.length})`;
+    });
+    const row = UI.el("div", "char-photos");
+    for (const p of c.photos) {
+      const img = UI.el("img", "");
+      img.src = (typeof p === "string" ? p : p.url) || "";
+      img.loading = "lazy";
+      img.addEventListener("click", () => openPhotoModal(c, p));
+      row.appendChild(img);
+    }
+    photoWrap.append(toggle, row);
+    view.appendChild(photoWrap);
+  }
+
   const persona = threadPersona(activeThread) || pfrpSettings.activePersona();
-  const r = (txt) => applyTemplateVars(txt, c, persona);
+  const r = (txt) => {
+    const charName = c ? (c.name || "") : "";
+    return String(txt || "").split("{{char}}").join(charName);
+  };
   const sections = [
     { title: "Description", icon: "align-left", text: r(c.description) },
     { title: "Personality", icon: "person", text: r(c.personality) },
@@ -3188,7 +3363,7 @@ function renderCharacterView(c) {
     if (!s.text) continue;
     const card = UI.el("div", "char-view-sec");
     card.appendChild(UI.el("h3", "", `${UI.fa(s.icon)} ${s.title}`));
-    card.appendChild(UI.el("div", "char-view-sec-body", renderMarkdown(s.text)));
+    card.appendChild(UI.el("div", "char-view-sec-body", renderMarkdown(s.text).split("{{user}}").join('<span class="tpl-token">{{user}}</span>')));
     body.appendChild(card);
   }
   view.appendChild(body);
@@ -3788,6 +3963,7 @@ async function generateResponse(t, speaker, { guided = "", orderBase } = {}) {
     t.lastMessageTime = Date.now();
     t.updatedAt = Date.now();
     await pfrpDB.put("threads", t);
+    if (!ac.signal.aborted) rememberModel(currentThreadModel());
     await loadData();
     activeThread = threads.find((x) => x.id === t.id) || null;
     if (activeThread && activeThread.id === t.id) renderAllMessages();
@@ -3958,6 +4134,7 @@ async function regenerate(m) {
       m.genPos = m.variants.length - 1;
       m.content = full;
       await pfrpDB.put("messages", m);
+      if (!ac.signal.aborted) rememberModel(currentThreadModel());
     } else {
       m.content = prevContent;
     }
@@ -4076,11 +4253,27 @@ async function editMessage(m) {
 }
 
 /* ---------------- CONTEXT PANEL ---------------- */
+function closeCtxPanelVisual() {
+  els.ctxwrap.classList.add("collapsed");
+  els.ctxToggle.classList.remove("toggled");
+}
+
 function setCtx(open) {
+  if (open && activeDrawer === "chars") return;
   els.ctxwrap.classList.toggle("collapsed", !open);
   els.ctxToggle.classList.toggle("toggled", open);
+  if (open) applyCtxWidth();
+  else els.ctxwrap.style.width = "";
   pfrpSettings.data.ui.ctxOpen = open;
   pfrpSettings.save();
+}
+function applyCtxWidth() {
+  if (isMobileWidth() || els.ctxwrap.classList.contains("collapsed")) {
+    els.ctxwrap.style.width = "";
+    return;
+  }
+  const w = pfrpSettings.data.ui.ctxWidth || 310;
+  els.ctxwrap.style.width = Math.min(Math.max(w, 300), Math.max(300, Math.floor(window.innerWidth * 0.6))) + "px";
 }
 function setContextChar(id) {
   contextChar = id ? (characters.find((x) => x.id === id) || null) : null;
@@ -4125,6 +4318,21 @@ function renderContextCharacter(wrap, c, t) {
   card.appendChild(tags);
   card.appendChild(UI.el("span", "tag", "Explicitness: " + pfrpSettings.explicitnessLabel(c.explicitness || pfrpSettings.data.nsfw.chatDefault)));
   wrap.appendChild(card);
+
+  if (c.photos && c.photos.length) {
+    const pcard = UI.el("div", "panel-card");
+    pcard.appendChild(UI.el("h4", "", `${UI.fa("images")} Media`));
+    const row = UI.el("div", "char-photos");
+    for (const p of c.photos) {
+      const img = UI.el("img", "");
+      img.src = (typeof p === "string" ? p : p.url) || "";
+      img.loading = "lazy";
+      img.addEventListener("click", () => openPhotoModal(c, p));
+      row.appendChild(img);
+    }
+    pcard.appendChild(row);
+    wrap.appendChild(pcard);
+  }
 
   const tabs = UI.el("div", "tabbar");
   const tabDefs = [
@@ -4306,6 +4514,37 @@ function renderContextChat(wrap, t) {
   wrap.appendChild(memory);
 }
 
+function openPhotoModal(c, photo) {
+  const url = (typeof photo === "string" ? photo : photo.url) || "";
+  const wrap = UI.el("div", "");
+  const img = UI.el("img", "img-view-img");
+  img.src = url;
+  wrap.appendChild(img);
+  const act = UI.el("div", "modal-actions");
+  const avatar = UI.el("button", "btn primary", UI.fa("user") + " Set as avatar");
+  avatar.addEventListener("click", async () => {
+    c.avatar = url;
+    c.updatedAt = Date.now();
+    await pfrpDB.put("characters", c);
+    await loadData();
+    overlay.remove();
+    renderCenter();
+    UI.showToast("Avatar updated");
+  });
+  const del = UI.el("button", "btn danger", UI.fa("trash") + " Remove photo");
+  del.addEventListener("click", async () => {
+    c.photos = (c.photos || []).filter((x) => x !== photo);
+    await pfrpDB.put("characters", c);
+    await loadData();
+    overlay.remove();
+    renderCenter();
+    UI.showToast("Photo removed");
+  });
+  act.append(avatar, del);
+  wrap.appendChild(act);
+  const overlay = UI.openModal(wrap, { title: "Photo" });
+}
+
 /* ---------------- EVENTS / INIT ---------------- */
 
 function initEvents() {
@@ -4357,7 +4596,32 @@ function initEvents() {
 
   els.dCollapse.addEventListener("click", () => setDrawerOpen(false));
 
+  const resizeHandle = UI.el("div", "ctx-resize");
+  els.ctxwrap.appendChild(resizeHandle);
+  applyCtxWidth();
+  window.addEventListener("resize", applyCtxWidth);
+  resizeHandle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    resizeHandle.classList.add("active");
+    const startX = e.clientX;
+    const startW = els.ctxwrap.getBoundingClientRect().width;
+    const onMove = (ev) => {
+      const w = Math.min(Math.max(startW - (ev.clientX - startX), 300), Math.max(300, Math.floor(window.innerWidth * 0.6)));
+      els.ctxwrap.style.width = w + "px";
+    };
+    const onUp = () => {
+      resizeHandle.classList.remove("active");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      pfrpSettings.data.ui.ctxWidth = Math.round(els.ctxwrap.getBoundingClientRect().width);
+      pfrpSettings.save();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+
   els.ctxToggle.addEventListener("click", () => {
+    if (activeDrawer === "chars") return;
     const open = !els.ctxwrap.classList.contains("collapsed");
     const isChatView = !contextChar && !!activeThread;
     if (open && isChatView) {
@@ -4397,9 +4661,12 @@ function initEvents() {
     els.input.style.height = "auto";
     els.input.style.height = Math.min(els.input.scrollHeight, 8 * parseFloat(getComputedStyle(els.input).lineHeight)) + "px";
   });
-  els.attachBtn.addEventListener("click", () => UI.showToast("Image attachment coming in a later step"));
   els.imgBtn.addEventListener("click", openGenerateImageModal);
   els.helpWrite.addEventListener("click", () => UI.showToast("Help-me-write coming in a later step"));
+}
+
+function isMobileWidth() {
+  return window.innerWidth <= 700;
 }
 
 async function init() {
@@ -4413,8 +4680,8 @@ async function init() {
   await loadModelCache();
   const ui = pfrpSettings.data.ui;
   setDrawer(DRAWERS[ui.lastDrawer] ? ui.lastDrawer : "chats");
-  setDrawerOpen(ui.drawerOpen !== false);
-  setCtx(ui.ctxOpen !== false);
+  setDrawerOpen(isMobileWidth() ? false : ui.drawerOpen !== false);
+  setCtx(false);
   Sync.init();
   initEvents();
   setupImportDrop();

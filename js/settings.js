@@ -55,6 +55,45 @@ const IMAGE_SAFETY = [
   { value: "explicit", label: "Explicit", desc: "Adult image generations allowed." },
 ];
 
+const STORY_OPTIONS = {
+  difficulty: [
+    { value: "easy", label: "Easy" },
+    { value: "average", label: "Average" },
+    { value: "difficult", label: "Difficult" },
+    { value: "nightmare", label: "Nightmare" },
+  ],
+  pacing: [
+    { value: "fast", label: "Fast" },
+    { value: "natural", label: "Natural" },
+    { value: "slow", label: "Slow-Burn" },
+  ],
+  pov: [
+    { value: "1st", label: "1st POV" },
+    { value: "2nd", label: "2nd POV" },
+    { value: "3rd", label: "3rd POV" },
+  ],
+  tense: [
+    { value: "past", label: "Past" },
+    { value: "present", label: "Present" },
+  ],
+  delivery: [
+    { value: "dialogue", label: "More Dialogue" },
+    { value: "normal", label: "Normal" },
+    { value: "actions", label: "More Actions" },
+  ],
+  style: [
+    { value: "", label: "N/A" },
+    { value: "high-society", label: "High Society" },
+    { value: "noir", label: "Noir" },
+    { value: "after-dark", label: "After Dark" },
+    { value: "nostalgia", label: "Nostalgia" },
+    { value: "blockbuster", label: "Blockbuster" },
+    { value: "arcane", label: "Arcane" },
+    { value: "manga-style", label: "Manga-style" },
+    { value: "impending-doom", label: "Impending Doom" },
+  ],
+};
+
 const STORE_KEY = "pfrp.settings.v1";
 const GATE_KEY = "pfrp.agreed.v1";
 
@@ -81,6 +120,31 @@ Write vivid, engaging prose in the style of quality fiction: rich sensory detail
 Match the tone, pacing, and length of the user's replies, and drive the scene forward with interesting choices and consequences. Respect the chat's configured content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.
 
 Never break character, never mention being an AI or a language model, never narrate what you are doing, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
+
+const ZETA_STYLE_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Your entire output is the scene itself: the characters' dialogue, their actions, and the world's description. Never write instructions to yourself, never describe or explain your own behavior, and never reveal an AI's thought process or reasoning. The user controls their own character completely; never act or speak for them.
+
+Write vivid, engaging prose in the style of quality fiction. Use *asterisks* to enclose actions and body language (for example: *she tilts her head, unbothered*). Spoken dialogue is wrapped in "quotes".
+
+Keep paragraphs short and punchy - one beat, one thought. Let dialogue and action trade back and forth like a well-paced scene: a line, a reaction, a line back. Describe the world through the senses. When several characters are present, let them bounce off each other naturally, each with their own distinct voice.
+
+Match the tone, pacing, and length of the user's replies, and drive the scene forward with interesting choices and consequences. Respect the chat's configured content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.
+
+Never break character, never mention being an AI or a language model, never narrate what you are doing, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
+
+const BUILTIN_PROMPT_PRESETS = [
+  {
+    id: "pfrp",
+    name: "PFRP Standard",
+    desc: "Balanced roleplay: dialogue in \"quotes\", actions in *asterisks*, pacing matched to your replies, classic fiction prose.",
+    system: DEFAULT_SYSTEM_PROMPT,
+  },
+  {
+    id: "zeta",
+    name: "Scene Style (Zeta-like)",
+    desc: "Cinematic scenes: short punchy paragraphs, one beat per line, quick dialogue back-and-forth, heavy sensory detail.",
+    system: ZETA_STYLE_SYSTEM_PROMPT,
+  },
+];
 
 const DEFAULT_SETTINGS = {
   version: 1,
@@ -132,6 +196,18 @@ const DEFAULT_SETTINGS = {
   loreBooks: [],
   favoriteModels: [],
   recentModels: [],
+  promptPresets: [],
+  activePresetId: "pfrp",
+  sceneModeDefault: false,
+  urlProxy: "",
+  story: {
+    difficulty: "average",
+    pacing: "natural",
+    pov: "2nd",
+    tense: "present",
+    delivery: "normal",
+    style: "",
+  },
   memory: {
     autoSummarize: true,
   },
@@ -257,4 +333,6 @@ window.IMAGE_PROVIDERS = IMAGE_PROVIDERS;
 window.THEMES = THEMES;
 window.EXPLICITNESS = EXPLICITNESS;
 window.IMAGE_SAFETY = IMAGE_SAFETY;
+window.STORY_OPTIONS = STORY_OPTIONS;
 window.DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT;
+window.BUILTIN_PROMPT_PRESETS = BUILTIN_PROMPT_PRESETS;

@@ -86,6 +86,98 @@ function rememberModel(model) {
   pfrpSettings.save();
 }
 
+function storySetting(t, key) {
+  const defs = pfrpSettings.data.story || {};
+  if (t && t[key] != null && t[key] !== "") return t[key];
+  return defs[key] != null ? defs[key] : STORY_DEFAULTS[key];
+}
+
+const STORY_DEFAULTS = {
+  difficulty: "average",
+  pacing: "natural",
+  pov: "2nd",
+  tense: "present",
+  delivery: "normal",
+  style: "",
+};
+
+const STORY_INSTRUCTIONS = {
+  difficulty: {
+    easy: "World difficulty is easy - characters naturally cooperate and situations resolve smoothly.",
+    average: "Characters' behavior naturally aligns with the situation and their personality.",
+    difficult: "Characters are often uncooperative - expect resistance, friction, and complications.",
+    nightmare: "The world is hostile - characters are frequently uncooperative and situations turn dangerous.",
+  },
+  pacing: {
+    fast: "Pacing: explosive, rapid scenario progression.",
+    natural: "Pacing: realistic scenario progression.",
+    slow: "Pacing: slow-burn - let scenes simmer and tension build gradually.",
+  },
+  pov: {
+    "1st": "Point of view: first person (I/me) for narration and descriptions.",
+    "2nd": "Point of view: second person - describe the world as the user experiences it (you).",
+    "3rd": "Point of view: third person - narrate from an external perspective (he/she/they).",
+  },
+  tense: {
+    past: "Tense: past - narrate events as they happened (e.g. she walked).",
+    present: "Tense: present - narrate events as they happen (e.g. she walks).",
+  },
+  delivery: {
+    dialogue: "Narrative delivery: lean toward more dialogue than description.",
+    normal: "Narrative delivery: balance dialogue and description.",
+    actions: "Narrative delivery: lean toward more actions and body language than dialogue.",
+  },
+  style: {
+    "high-society": "Storytelling style: high society - elegant, formal, opulent tone.",
+    noir: "Storytelling style: noir - hardboiled, shadowy, cynical tone.",
+    "after-dark": "Storytelling style: after dark - sensual, atmospheric, late-night tone.",
+    nostalgia: "Storytelling style: nostalgia - wistful, warm, memory-tinged tone.",
+    blockbuster: "Storytelling style: blockbuster - cinematic, high-stakes, spectacle-driven tone.",
+    arcane: "Storytelling style: arcane - mystical, esoteric, magical tone.",
+    "manga-style": "Storytelling style: manga - dramatic, exaggerated, panel-like beats.",
+    "impending-doom": "Storytelling style: impending doom - creeping dread and ominous foreshadowing.",
+  },
+};
+
+function storyInstructions(t) {
+  const lines = [];
+  const keys = ["difficulty", "pacing", "pov", "tense", "delivery", "style"];
+  for (const key of keys) {
+    const v = storySetting(t, key);
+    if (!v) continue;
+    const line = (STORY_INSTRUCTIONS[key] || {})[v];
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+function storyControls(get, set) {
+  const grid = UI.el("div", "story-grid");
+  const defs = [
+    ["difficulty", "World Difficulty"],
+    ["pacing", "Pacing"],
+    ["pov", "Point of View"],
+    ["tense", "Chat Tense"],
+    ["delivery", "Narrative Delivery"],
+    ["style", "Storytelling Style"],
+  ];
+  for (const [key, label] of defs) {
+    const cell = UI.el("div", "form-group");
+    cell.appendChild(UI.el("label", "field-label", label));
+    const sel = UI.el("select", "select");
+    for (const o of STORY_OPTIONS[key]) {
+      const opt = UI.el("option", "", o.label);
+      opt.value = o.value;
+      sel.appendChild(opt);
+    }
+    sel.value = get(key) || "";
+    sel.addEventListener("change", () => set(key, sel.value));
+    cell.appendChild(sel);
+    grid.appendChild(cell);
+  }
+  return grid;
+}
+
 function toggleFavoriteModel(model) {
   if (!model) return false;
   const s = pfrpSettings.data;
@@ -133,7 +225,12 @@ async function loadModelCache() {
   const connId = pfrpSettings.activeConnection().id;
   try {
     const data = await Provider.listModels();
-    modelCache = (data.data || []).map((m) => m.id).filter(Boolean).sort();
+    const list = Array.isArray(data.data)
+      ? data.data.map((m) => m.id)
+      : Array.isArray(data.models)
+        ? data.models.map((m) => m.name || m.id)
+        : [];
+    modelCache = list.filter(Boolean).sort();
     modelCacheFor = connId;
   } catch {
     modelCache = [];
@@ -607,6 +704,7 @@ function renderCharsDrawer() {
         tagline: seed.tagline,
         description: seed.description,
         personality: seed.personality,
+        attitude: seed.attitude,
         appearance: seed.appearance,
         scenario: seed.scenario,
         first_mes: seed.first_mes,
@@ -1026,7 +1124,12 @@ function summarySlice(t) {
 
 async function runSummary(t, toSummarize) {
   const transcript = toSummarize
-    .map((m) => (m.role === "user" ? "User" : (m.name || "Character")) + ": " + (m.image ? "[Image: " + (m.content || "attached image") + "]" : m.content))
+    .flatMap((m) => {
+      if (m.blocks && m.blocks.length) {
+        return m.blocks.map((b) => (b.narrator ? "Narrator: " + b.content : b.name + ": " + b.content));
+      }
+      return [m.role === "user" ? "User: " + (m.image ? "[Image: " + (m.content || "attached image") + "]" : m.content) : (m.name || "Character") + ": " + (m.image ? "[Image: " + (m.content || "attached image") + "]" : m.content)];
+    })
     .join("\n\n");
   const sys = "You are a story summarizer for a roleplay chat. Merge the previous summary (if provided) with the new conversation below into ONE continuous third-person story summary. Preserve all important facts: characters present, relationships, plot events, revelations, promises, injuries, items, and locations. It is narration, not dialogue. Aim for 400-700 words.";
   summarizingThreads.add(t.id);
@@ -1374,6 +1477,20 @@ function buildConnectionSettings() {
   modelWrap.appendChild(customModel);
   wrap.appendChild(modelWrap);
 
+  const proxyWrap = UI.el("div", "form-group");
+  proxyWrap.appendChild(UI.el("label", "field-label", "URL fetch proxy (optional)"));
+  const proxyIn = UI.el("input", "input");
+  proxyIn.type = "text";
+  proxyIn.placeholder = "e.g. http://localhost:8787/?url=";
+  proxyIn.value = s.urlProxy || "";
+  proxyIn.addEventListener("input", () => {
+    s.urlProxy = proxyIn.value.trim();
+    pfrpSettings.save();
+  });
+  proxyWrap.appendChild(proxyIn);
+  proxyWrap.appendChild(UI.el("div", "hint", "Used by Create character from URL. Some sites block the built-in public proxies - run your own tiny proxy (see resources/cors-proxy.js) and paste its address here, with the URL appended after it. Without a proxy, you can still paste page content manually in the URL dialog."));
+  wrap.appendChild(proxyWrap);
+
   function fillModelOptions(currentModel) {
     const opts = new Set(modelCache);
     if (currentModel) opts.add(currentModel);
@@ -1413,25 +1530,6 @@ function buildConnectionSettings() {
       customModel.value = "";
     }
   });
-
-  const sysWrap = UI.el("div", "form-group");
-  const sysLabelRow = UI.el("div", "sys-label-row");
-  sysLabelRow.appendChild(UI.el("label", "field-label", "Default system prompt"));
-  const restore = UI.el("button", "btn ghost small", UI.fa("rotate-left") + " Restore default prompt");
-  restore.title = "Restore the built-in default roleplay prompt";
-  restore.addEventListener("click", () => {
-    sys.value = DEFAULT_SYSTEM_PROMPT;
-    s.system = DEFAULT_SYSTEM_PROMPT;
-    pfrpSettings.save();
-    UI.showToast("Default prompt restored");
-  });
-  sysLabelRow.appendChild(restore);
-  sysWrap.appendChild(sysLabelRow);
-  const sys = UI.el("textarea", "textarea");
-  sys.value = s.system;
-  sys.placeholder = "Optional default system prompt for new chats…";
-  sysWrap.appendChild(sys);
-  wrap.appendChild(sysWrap);
 
   const status = UI.el("div", "status-line");
   const row = UI.el("div", "modal-actions");
@@ -1658,6 +1756,141 @@ function buildGenerationSettings() {
   sumRow.appendChild(sumSw);
   wrap.appendChild(sumRow);
   wrap.appendChild(UI.el("div", "hint", "When a chat grows long, older messages are summarized in the background so the AI remembers the story. The rolling summary is fed back into prompts while the summarized messages are dropped from the context."));
+  wrap.appendChild(UI.el("div", "spacer-h", ""));
+
+  wrap.appendChild(UI.el("label", "field-label", "Style preset"));
+  const presetWrap = UI.el("div", "form-group");
+  const presetSel = UI.el("select", "select");
+  const presetDesc = UI.el("div", "hint");
+  const allPresets = () => [...BUILTIN_PROMPT_PRESETS, ...(pfrpSettings.data.promptPresets || [])];
+  const fillPresets = () => {
+    presetSel.innerHTML = "";
+    for (const p of allPresets()) {
+      const o = UI.el("option", "", p.name + (p.id === pfrpSettings.data.activePresetId ? " (active)" : ""));
+      o.value = p.id;
+      presetSel.appendChild(o);
+    }
+    presetSel.value = pfrpSettings.data.activePresetId || "pfrp";
+    updateDesc();
+  };
+  const updateDesc = () => {
+    const p = allPresets().find((x) => x.id === presetSel.value);
+    presetDesc.textContent = p && p.desc ? p.desc : "Custom preset.";
+  };
+  presetSel.addEventListener("change", updateDesc);
+  fillPresets();
+  presetWrap.appendChild(presetSel);
+  presetWrap.appendChild(presetDesc);
+  wrap.appendChild(presetWrap);
+  const presetRow = UI.el("div", "key-row");
+  const applyBtn = UI.el("button", "", UI.fa("check") + " Apply");
+  applyBtn.addEventListener("click", () => {
+    const p = allPresets().find((x) => x.id === presetSel.value);
+    if (!p) return;
+    s.system = p.system;
+    pfrpSettings.data.activePresetId = p.id;
+    pfrpSettings.save();
+    sys.value = s.system;
+    fillPresets();
+    UI.showToast("Style preset applied: " + p.name);
+  });
+  const saveBtn = UI.el("button", "", UI.fa("floppy-disk") + " Save current");
+  saveBtn.addEventListener("click", () => {
+    const rw = UI.el("div", "");
+    const inp = UI.el("input", "input");
+    inp.placeholder = "Preset name";
+    inp.value = "";
+    rw.appendChild(inp);
+    const act = UI.el("div", "modal-actions");
+    const cancel = UI.el("button", "btn ghost", "Cancel");
+    const ok = UI.el("button", "btn primary", "Save preset");
+    cancel.addEventListener("click", () => ov.remove());
+    ok.addEventListener("click", () => {
+      const name = inp.value.trim();
+      if (!name) return;
+      const presets = pfrpSettings.data.promptPresets || [];
+      presets.push({ id: "preset-" + Date.now().toString(36), name, system: s.system });
+      pfrpSettings.data.promptPresets = presets;
+      pfrpSettings.data.activePresetId = presets[presets.length - 1].id;
+      pfrpSettings.save();
+      ov.remove();
+      fillPresets();
+      UI.showToast("Preset saved");
+    });
+    act.append(ok, cancel);
+    rw.appendChild(act);
+    const ov = UI.openModal(rw, { title: "Save current style as preset" });
+  });
+  const delBtn = UI.el("button", "", UI.fa("trash"));
+  delBtn.title = "Delete the selected custom preset";
+  delBtn.addEventListener("click", async () => {
+    const p = allPresets().find((x) => x.id === presetSel.value);
+    if (!p || BUILTIN_PROMPT_PRESETS.some((b) => b.id === p.id)) {
+      UI.showToast("Built-in presets cannot be deleted", { type: "err" });
+      return;
+    }
+    const ok = await UI.confirmModal({ title: "Delete preset?", message: `"${p.name}" will be permanently removed.`, confirmText: "Delete" });
+    if (!ok) return;
+    pfrpSettings.data.promptPresets = (pfrpSettings.data.promptPresets || []).filter((x) => x.id !== p.id);
+    if (pfrpSettings.data.activePresetId === p.id) pfrpSettings.data.activePresetId = "pfrp";
+    pfrpSettings.save();
+    fillPresets();
+    UI.showToast("Preset deleted");
+  });
+  presetRow.append(applyBtn, saveBtn, delBtn);
+  wrap.appendChild(presetRow);
+  wrap.appendChild(UI.el("div", "hint", "Presets swap the default system prompt below. Save your current prompt as a custom preset any time."));
+  wrap.appendChild(UI.el("div", "spacer-h", ""));
+
+  const sysWrap = UI.el("div", "form-group");
+  const sysLabelRow = UI.el("div", "sys-label-row");
+  sysLabelRow.appendChild(UI.el("label", "field-label", "Default system prompt"));
+  const restore = UI.el("button", "btn ghost small", UI.fa("rotate-left") + " Restore default prompt");
+  restore.title = "Restore the built-in default roleplay prompt";
+  restore.addEventListener("click", () => {
+    sys.value = DEFAULT_SYSTEM_PROMPT;
+    s.system = DEFAULT_SYSTEM_PROMPT;
+    pfrpSettings.data.activePresetId = "pfrp";
+    pfrpSettings.save();
+    fillPresets();
+    UI.showToast("Default prompt restored");
+  });
+  sysLabelRow.appendChild(restore);
+  sysWrap.appendChild(sysLabelRow);
+  const sys = UI.el("textarea", "textarea");
+  sys.value = s.system;
+  sys.placeholder = "Optional default system prompt for new chats...";
+  sys.addEventListener("input", () => {
+    s.system = sys.value;
+    pfrpSettings.save();
+  });
+  sysWrap.appendChild(sys);
+  wrap.appendChild(sysWrap);
+  wrap.appendChild(UI.el("div", "spacer-h", ""));
+
+  const smdRow = UI.el("div", "rowline");
+  smdRow.appendChild(UI.el("span", "", "Scene mode for new chats"));
+  const smdSw = UI.el("div", "switch" + (s.sceneModeDefault ? " on" : ""));
+  smdSw.addEventListener("click", () => {
+    s.sceneModeDefault = !s.sceneModeDefault;
+    smdSw.classList.toggle("on", s.sceneModeDefault);
+    pfrpSettings.save();
+  });
+  smdRow.appendChild(smdSw);
+  wrap.appendChild(smdRow);
+  wrap.appendChild(UI.el("div", "hint", "New chats start in Scene mode (one response writes the whole scene with speaker blocks and narrator beats). Can be toggled per chat in Chat Settings."));
+  wrap.appendChild(UI.el("div", "spacer-h", ""));
+
+  wrap.appendChild(UI.el("label", "field-label", "Story defaults"));
+  wrap.appendChild(storyControls(
+    (k) => (pfrpSettings.data.story || {})[k],
+    (k, v) => {
+      pfrpSettings.data.story = pfrpSettings.data.story || {};
+      pfrpSettings.data.story[k] = v;
+      pfrpSettings.save();
+    }
+  ));
+  wrap.appendChild(UI.el("div", "hint", "Story defaults for new chats. Each chat can override these in Chat Settings."));
   return wrap;
 }
 
@@ -2486,6 +2719,7 @@ function openCharacterEditor(c = {}) {
   gDesc.g.appendChild(UI.el("div", "hint", "Tip: use {{char}} for this character's name and {{user}} for the user's name."));
   const gAppear = f("Appearance", "How they look (optional)", c.appearance, "textarea", true);
   const gPersonality = f("Personality", "Short trait list, e.g. caring, protective, witty", c.personality, "textarea", true);
+  const gAttitude = f("How they treat {{user}}", "How this character acts toward the user, e.g. \"Treats you like an old rival she plans to finally beat\"", c.attitude, "textarea", true);
   const gScenario = f("Scenario", "Setting / situation", c.scenario, "textarea", true);
 
   const photosG = UI.el("div", "form-group");
@@ -2561,6 +2795,7 @@ function openCharacterEditor(c = {}) {
     add("Description", gDesc.el.value);
     add("Appearance", gAppear.el.value);
     add("Personality", gPersonality.el.value);
+    add("How they treat you", gAttitude.el.value);
     add("Scenario", gScenario.el.value);
     add("First message", gFirst.el.value);
     add("Example dialogue", gExample.el.value);
@@ -2570,7 +2805,7 @@ function openCharacterEditor(c = {}) {
   };
 
   const detailsBody = UI.el("div", "");
-  detailsBody.append(gDesc.g, gAppear.g, gPersonality.g, gScenario.g, nsfwG);
+  detailsBody.append(gDesc.g, gAppear.g, gPersonality.g, gAttitude.g, gScenario.g, nsfwG);
   const chatBody = UI.el("div", "");
   chatBody.append(gFirst.g, gExample.g, gAlt.g, gSystem.g, gPost.g);
   const mediaBody = UI.el("div", "");
@@ -2605,6 +2840,7 @@ function openCharacterEditor(c = {}) {
       description: gDesc.el.value.trim(),
       appearance: gAppear.el.value.trim(),
       personality: gPersonality.el.value.trim(),
+      attitude: gAttitude.el.value.trim(),
       scenario: gScenario.el.value.trim(),
       first_mes: gFirst.el.value.trim(),
       mes_example: gExample.el.value.trim(),
@@ -2646,11 +2882,439 @@ function newCharacterChooser() {
     overlay.remove();
     aiGenerateCharacter();
   }));
+  wrap.appendChild(choiceCard("link", "From URL", "Paste a link to a wiki page or character card site and let the AI build the character", () => {
+    overlay.remove();
+    aiCharacterFromUrl();
+  }));
   wrap.appendChild(choiceCard("database", "From Character DB", "Browse the community character database (coming soon)", () => {
     overlay.remove();
     UI.showToast("Character DB coming soon");
   }));
   const overlay = UI.openModal(wrap, { title: "New character" });
+}
+
+function stripHtmlToText(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractEmbeddedCharacter(html) {
+  const candidates = [];
+  const jsonLd = String(html).match(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi);
+  if (jsonLd) {
+    for (const block of jsonLd) {
+      const inner = block.replace(/<[^>]+>/g, "");
+      try {
+        const data = JSON.parse(inner);
+        if (Array.isArray(data)) candidates.push(...data);
+        else candidates.push(data);
+      } catch {}
+    }
+  }
+  const nextData = String(html).match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+  if (nextData) {
+    try {
+      const parsed = JSON.parse(nextData[1]);
+      candidates.push(parsed);
+    } catch {}
+  }
+  for (const data of candidates) {
+    const found = deepFindCharacter(data);
+    if (found) return found;
+  }
+  return null;
+}
+
+function deepFindCharacter(node, depth = 0) {
+  if (!node || typeof node !== "object" || depth > 8) return null;
+  const name = node.name;
+  const looksLikeCard =
+    name &&
+    (node.description || node.personality || node.greeting || node.first_mes || node.firstMessage || node.scenario || node.instructions || node.mes_example);
+  if (looksLikeCard) return node;
+  for (const key of Object.keys(node)) {
+    const found = deepFindCharacter(node[key], depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function fetchPageViaProxy(url, signal) {
+  const custom = (pfrpSettings.data.urlProxy || "").trim();
+  if (custom) {
+    try {
+      const res = await fetch(custom + encodeURIComponent(url), { signal });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.length >= 60) return text;
+      }
+    } catch {}
+  }
+  const proxies = [
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  ];
+  let lastErr = null;
+  for (const p of proxies) {
+    try {
+      const res = await fetch(p(url), { signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const text = await res.text();
+      if (!text || text.length < 60) throw new Error("Page is empty");
+      return text;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Could not fetch the page");
+}
+
+function aiCharacterFromUrl() {
+  const PARSER_SYS = 'You are a character card parser. Given raw content from a web page about a character, return ONLY valid JSON with these fields: {"name": string, "tagline": string (short, 3-6 words), "description": string (detailed persona/backstory), "personality": string (comma-separated traits), "attitude": string (one line on how the character acts toward the user), "appearance": string, "scenario": string (a short setting/situation to start a roleplay), "first_mes": string (an opening message spoken by the character), "mes_example": string (one short example dialogue exchange)}. Preserve all facts from the input; do not invent new ones. No markdown fences, no extra text.';
+  const wrap = UI.el("div", "");
+  wrap.appendChild(UI.el("p", "modal-desc", "Paste a link to a fandom wiki page or a character card site. The AI reads the page and drafts the character for you to review and edit. Card sites are downloaded directly, including the character's image."));
+  const inp = UI.el("input", "input");
+  inp.type = "url";
+  inp.placeholder = "https://...";
+  wrap.appendChild(inp);
+  const status = UI.el("div", "hint");
+
+  const pasteCtn = UI.el("div", "form-group");
+  pasteCtn.style.display = "none";
+  pasteCtn.appendChild(UI.el("label", "field-label", "Or paste the page content"));
+  const pasteTa = UI.el("textarea", "textarea");
+  pasteTa.rows = 5;
+  pasteTa.placeholder = "If automatic fetching is blocked, open the page yourself, copy its content, and paste it here.";
+  pasteCtn.appendChild(pasteTa);
+  const pasteBtn = UI.el("button", "btn", UI.fa("clipboard") + " Use pasted content");
+  pasteBtn.addEventListener("click", async () => {
+    const text = pasteTa.value.trim();
+    if (!text) {
+      UI.showToast("Paste the page content first", { type: "err" });
+      return;
+    }
+    pasteBtn.disabled = true;
+    status.textContent = "Building the character...";
+    try {
+      const out = await Provider.complete([{ role: "user", content: "Page content:\n" + text.slice(0, 12000) }], { system: PARSER_SYS, temperature: 0.4 });
+      const data = JSON.parse(out.replace(/```json|```/g, "").trim());
+      overlay.remove();
+      openCharacterEditor(data);
+    } catch (e) {
+      status.textContent = "Failed: " + e.message;
+      pasteBtn.disabled = false;
+    }
+  });
+  pasteCtn.appendChild(pasteBtn);
+  wrap.appendChild(pasteCtn);
+
+  const row = UI.el("div", "modal-actions");
+  const cancel = UI.el("button", "btn ghost", "Cancel");
+  cancel.addEventListener("click", () => overlay.remove());
+  const gen = UI.el("button", "btn primary", UI.fa("wand-magic-sparkles") + " Create character");
+  gen.addEventListener("click", async () => {
+    const url = inp.value.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      UI.showToast("Enter a valid URL starting with http(s)://", { type: "err" });
+      return;
+    }
+    gen.disabled = true;
+    status.textContent = "Looking for a character card...";
+    try {
+      const ac = new AbortController();
+
+      let cardRecord = null;
+      for (const trySite of [tryAicharactercards, tryCharacterTavern, tryChub, tryJannyai]) {
+        try {
+          const rec = await trySite(url, ac.signal);
+          if (rec) {
+            cardRecord = rec;
+            break;
+          }
+        } catch (e) {
+          console.warn("Card site extraction failed:", e && e.message);
+        }
+      }
+      if (cardRecord) {
+        status.textContent = "Card found - opening the editor...";
+        overlay.remove();
+        openCharacterEditor(cardRecord);
+        return;
+      }
+
+      let pageText = "";
+      let imageUrl = null;
+      let fields = null;
+
+      const wiki = wikiPageInfo(url);
+      if (wiki) {
+        status.textContent = "Reading the wiki page...";
+        const w = await fetchWikiPage(url, ac.signal);
+        if (w) {
+          pageText = w.text;
+          imageUrl = w.imageUrl;
+        }
+      }
+
+      if (!pageText) {
+        status.textContent = "Fetching the page...";
+        const html = await fetchPageViaProxy(url, ac.signal);
+        const embedded = extractEmbeddedCharacter(html);
+        if (embedded) {
+          fields = {
+            name: embedded.name || "",
+            tagline: embedded.tagline || embedded.shortDescription || "",
+            description: embedded.description || embedded.instructions || "",
+            personality: embedded.personality || "",
+            appearance: embedded.appearance || embedded.appearanceDescription || "",
+            scenario: embedded.scenario || "",
+            first_mes: embedded.first_mes || embedded.greeting || embedded.firstMessage || "",
+            mes_example: embedded.mes_example || embedded.exampleDialogue || "",
+          };
+          imageUrl = embedded.image || embedded.avatarUrl || embedded.profileImageUrl || embedded.avatar || null;
+          status.textContent = "Found a character card on the page - refining with AI...";
+        }
+        pageText = stripHtmlToText(html).slice(0, 12000);
+        imageUrl = imageUrl || extractImageUrl(html);
+      }
+      if (!pageText) throw new Error("The page has no readable content");
+
+      let avatarDataUrl = "";
+      if (imageUrl) {
+        status.textContent = "Fetching the character image...";
+        try {
+          avatarDataUrl = await fetchImageAsDataUrl(imageUrl, ac.signal);
+        } catch (e) {
+          console.warn("Avatar fetch failed:", e && e.message);
+        }
+      }
+
+      const sys = PARSER_SYS;
+      const hint = fields ? "Known fields found on the page (keep and refine them):\n" + JSON.stringify(fields) + "\n\nPage content:\n" + pageText : "Page content:\n" + pageText;
+      status.textContent = "Building the character...";
+      const text = await Provider.complete([{ role: "user", content: hint }], { system: sys, temperature: 0.4 });
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const data = JSON.parse(cleaned);
+      overlay.remove();
+      openCharacterEditor(Object.assign({}, fields, data, avatarDataUrl ? { avatar: avatarDataUrl } : {}));
+    } catch (e) {
+      status.textContent = "Failed: " + e.message;
+      pasteCtn.style.display = "";
+      gen.disabled = false;
+    }
+  });
+  row.append(cancel, gen);
+  wrap.appendChild(row);
+  wrap.appendChild(status);
+  const overlay = UI.openModal(wrap, { title: "Create character from URL", wide: true });
+}
+
+function wikiPageInfo(url) {
+  const m = String(url).match(/^https?:\/\/([^/]+)\/(?:[a-z-]+\/)*wiki\/([^#?]+)/i);
+  if (!m) return null;
+  const host = m[1].toLowerCase();
+  const looksWiki = /fandom\.com|wikia\.com|gamepedia\.com|wiki/.test(host) || String(url).toLowerCase().includes("/wiki/");
+  if (!looksWiki) return null;
+  return {
+    apiBase: "https://" + host + "/api.php",
+    page: decodeURIComponent(m[2].replace(/_/g, " ")),
+  };
+}
+
+async function fetchWikiPage(url, signal) {
+  const info = wikiPageInfo(url);
+  if (!info) return null;
+  try {
+    const apiUrl = info.apiBase + "?action=parse&page=" + encodeURIComponent(info.page) + "&format=json&prop=text&redirects=1&origin=*";
+    const res = await fetch(apiUrl, { signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.error || !data.parse || !data.parse.text) return null;
+    const pageText = stripHtmlToText(data.parse.text["*"]).slice(0, 12000);
+    if (!pageText) return null;
+    let imageUrl = null;
+    try {
+      const title = data.parse.title || info.page;
+      const imgUrl = info.apiBase + "?action=query&titles=" + encodeURIComponent(title) + "&prop=pageimages&format=json&piprop=thumbnail&pithumbsize=600&origin=*";
+      const imgRes = await fetch(imgUrl, { signal });
+      const imgData = await imgRes.json();
+      const pages = (imgData && imgData.query && imgData.query.pages) || {};
+      for (const k of Object.keys(pages)) {
+        if (pages[k].thumbnail && pages[k].thumbnail.source) {
+          imageUrl = pages[k].thumbnail.source;
+          break;
+        }
+      }
+    } catch {}
+    return { text: pageText, imageUrl };
+  } catch {
+    return null;
+  }
+}
+
+function extractImageUrl(html) {
+  const s = String(html);
+  const og = s.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || s.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (og) return og[1];
+  const tw = s.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
+  if (tw) return tw[1];
+  const rel = s.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i);
+  if (rel) return rel[1];
+  return null;
+}
+
+async function fetchBlobViaProxy(url, signal) {
+  const custom = (pfrpSettings.data.urlProxy || "").trim();
+  if (custom) {
+    try {
+      const res = await fetch(custom + encodeURIComponent(url), { signal });
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob && blob.size > 40) return blob;
+      }
+    } catch {}
+  }
+  const proxies = [
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  ];
+  let lastErr = null;
+  for (const p of proxies) {
+    try {
+      const res = await fetch(p(url), { signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      if (blob && blob.size > 40) return blob;
+      throw new Error("Empty response");
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Could not fetch the file");
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+async function fetchImageAsDataUrl(url, signal) {
+  try {
+    const direct = await fetch(url, { signal });
+    if (direct.ok) {
+      const blob = await direct.blob();
+      if (blob && blob.size > 40) return await blobToDataUrl(blob);
+    }
+  } catch {}
+  return await blobToDataUrl(await fetchBlobViaProxy(url, signal));
+}
+
+async function cardRecordFromBlob(blob, name) {
+  const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+  const records = await Import.parseFile(file);
+  const rec = records && records[0];
+  if (!rec || !rec.name || rec.name === "Unnamed") return null;
+  return rec;
+}
+
+async function tryAicharactercards(url, signal) {
+  const m = String(url).match(/aicharactercards\.com\/cards\/([0-9]+)/i);
+  if (!m) return null;
+  const blob = await fetchBlobViaProxy("https://api.aicharactercards.com/api/cards/" + m[1] + "/download", signal);
+  return await cardRecordFromBlob(blob, "card.png");
+}
+
+async function tryCharacterTavern(url, signal) {
+  if (!/character-tavern\.com\/character\//i.test(url)) return null;
+  let cardUrl = url.replace(/^https:\/\/(www\.)?character-tavern\.com\/character\//i, "https://ct-cards.storage.character-tavern.com/").split("?")[0] + ".png";
+  if (/^https:\/\/cards\.character-tavern\.com\//i.test(url)) {
+    cardUrl = "https://ct-cards.storage.character-tavern.com/" + url.split("?")[0].replace(/^https:\/\/cards\.character-tavern\.com\//i, "");
+  }
+  const blob = await fetchBlobViaProxy(cardUrl, signal);
+  return await cardRecordFromBlob(blob, "card.png");
+}
+
+async function tryChub(url, signal) {
+  const m = String(url).match(/chub\.ai\/characters\/([^/?#]+)/i);
+  if (!m) return null;
+  const id = m[1];
+  try {
+    const res = await fetch("https://gateway.chub.ai/api/characters/" + encodeURIComponent(id) + "?full=true&nocache=" + Math.random(), { signal });
+    if (res.ok) {
+      const json = await res.json();
+      const def = json && json.node && json.node.definition;
+      if (def && def.name) {
+        let avatar = "";
+        try {
+          avatar = await fetchImageAsDataUrl(json.node.avatar_url || def.avatar || "", signal);
+        } catch {}
+        return {
+          name: def.name,
+          description: def.description || json.node.description || "",
+          personality: def.personality || def.tavern_personality || "",
+          scenario: def.scenario || "",
+          first_mes: def.first_message || "",
+          mes_example: def.example_dialogs || "",
+          alternate_greetings: def.alternate_greetings || [],
+          avatar,
+        };
+      }
+    }
+  } catch {}
+  try {
+    const blob = await fetchBlobViaProxy("https://avatars.charhub.io/avatars/" + encodeURIComponent(id) + "/chara_card_v2.png?nocache=" + Math.random(), signal);
+    return await cardRecordFromBlob(blob, "card.png");
+  } catch {
+    return null;
+  }
+}
+
+async function tryJannyai(url, signal) {
+  if (!/jannyai\.com|janitorai\.com/i.test(url)) return null;
+  const id = String(url).split("/").filter(Boolean).pop().split("?")[0];
+  const html = await fetchPageViaProxy("https://jannyai.com/characters/" + encodeURIComponent(id), signal);
+  const props = String(html).match(/props="(\{&quot;imageUrl.+?)"/);
+  if (!props) return null;
+  const jsonText = props[1].replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const json = JSON.parse(jsonText);
+  const char = json.character ? json.character[1] : null;
+  if (!char) return null;
+  for (const key of Object.keys(char)) char[key] = char[key] && char[key][1];
+  let avatar = "";
+  const avatarUrl = (json.imageUrl && json.imageUrl[1]) || char.avatar || "";
+  if (avatarUrl) {
+    try {
+      avatar = await fetchImageAsDataUrl(avatarUrl, signal);
+    } catch {}
+  }
+  return {
+    name: char.name || "",
+    tagline: (char.tags && char.tags.join(", ")) || "",
+    description: char.description || "",
+    personality: char.personality || "",
+    appearance: char.appearance || "",
+    scenario: char.scenario || "",
+    first_mes: char.firstMessage || char.first_mes || "",
+    mes_example: char.exampleDialogs || char.example_dialogue || "",
+    avatar,
+  };
 }
 
 function aiGenerateCharacter() {
@@ -2674,7 +3338,7 @@ function aiGenerateCharacter() {
     gen.disabled = true;
     status.textContent = "Generating character…";
     try {
-      const sys = 'You are a character creator. Return ONLY valid JSON with these fields: {"name": string, "tagline": string (short, 3-6 words), "description": string (detailed persona/backstory, markdown allowed), "personality": string (comma-separated traits), "appearance": string, "scenario": string, "first_mes": string (an opening message spoken by the character), "mes_example": string (one short example dialogue exchange)}. No markdown fences, no extra text outside the JSON.';
+      const sys = 'You are a character creator. Return ONLY valid JSON with these fields: {"name": string, "tagline": string (short, 3-6 words), "description": string (detailed persona/backstory, markdown allowed), "personality": string (comma-separated traits), "attitude": string (one line on how the character acts toward the user, e.g. "Treats you like an old rival she plans to finally beat"), "appearance": string, "scenario": string, "first_mes": string (an opening message spoken by the character), "mes_example": string (one short example dialogue exchange)}. No markdown fences, no extra text outside the JSON.';
       const text = await Provider.complete([{ role: "user", content: "Create a roleplay character based on this idea: " + idea }], { system: sys, temperature: 1.0 });
       const cleaned = text.replace(/```json|```/g, "").trim();
       const data = JSON.parse(cleaned);
@@ -2705,7 +3369,7 @@ function needsConversion(rec) {
 }
 
 async function aiConvertCharacter(rec, signal) {
-  const sys = 'You are a character card parser. Given a raw character description, return ONLY valid JSON with these fields: {"name": string, "tagline": string, "description": string (condensed persona and backstory), "personality": string (comma-separated traits), "appearance": string, "scenario": string, "first_mes": string, "mes_example": string}. Preserve all facts from the input; do not invent new ones. No markdown fences, no extra text.';
+  const sys = 'You are a character card parser. Given a raw character description, return ONLY valid JSON with these fields: {"name": string, "tagline": string, "description": string (condensed persona and backstory), "personality": string (comma-separated traits), "attitude": string (one line on how the character acts toward the user), "appearance": string, "scenario": string, "first_mes": string, "mes_example": string}. Preserve all facts from the input; do not invent new ones. No markdown fences, no extra text.';
   const text = await Provider.complete([{ role: "user", content: "Raw card:\n" + rec.description }], { system: sys, temperature: 0.3, signal });
   const cleaned = text.replace(/```json|```/g, "").trim();
   const fields = JSON.parse(cleaned);
@@ -2961,6 +3625,7 @@ async function createChatWithCharacter(characterId, personaId) {
     characterId,
     characterIds: [characterId],
     isGroup: false,
+    sceneMode: !!pfrpSettings.data.sceneModeDefault,
     userPersonaId: personaId || pfrpSettings.data.activePersonaId,
     explicitness: pfrpSettings.data.nsfw.chatDefault,
     temperature: pfrpSettings.data.temperature,
@@ -3098,6 +3763,7 @@ async function createGroupThread(characterIds, personaId) {
     isGroup: true,
     autoRespond: true,
     multiTurn: true,
+    sceneMode: !!pfrpSettings.data.sceneModeDefault,
     lastSpeakerId: characterIds[0],
     userPersonaId: personaId || pfrpSettings.data.activePersonaId,
     explicitness: pfrpSettings.data.nsfw.chatDefault,
@@ -3353,6 +4019,7 @@ function renderCharacterView(c) {
   const sections = [
     { title: "Description", icon: "align-left", text: r(c.description) },
     { title: "Personality", icon: "person", text: r(c.personality) },
+    { title: "How they treat you", icon: "hand", text: r(c.attitude) },
     { title: "Appearance", icon: "eye", text: r(c.appearance) },
     { title: "Scenario", icon: "map", text: r(c.scenario) },
     { title: "First message", icon: "comment-dots", text: r(c.first_mes) },
@@ -3453,13 +4120,18 @@ function roleLabel(m) {
 
 function renderMessage(m) {
   const row = UI.el("div", "msg " + (m.role === "user" ? "user" : ""));
-  const c = characters.find((x) => x.id === m.characterId);
+  const isScene = !!(m.blocks && m.blocks.length);
+  let c = characters.find((x) => x.id === m.characterId);
+  if (isScene && !c) {
+    const firstChar = m.blocks.find((b) => b.characterId);
+    c = firstChar ? characters.find((x) => x.id === firstChar.characterId) : null;
+  }
   const clickable = m.role !== "user" && c;
   if (m.role === "user") {
     const userAv = UI.el("div", "");
     userAv.innerHTML = userAvatarHtml();
     row.appendChild(userAv);
-  } else if (m.name === "Narrator" || (m.characterId == null && m.role === "assistant")) {
+  } else if (m.name === "Narrator" || (m.characterId == null && !c && m.role === "assistant")) {
     const navAv = UI.el("div", "av av-narrator");
     navAv.innerHTML = UI.fa("book-open");
     row.appendChild(navAv);
@@ -3474,9 +4146,16 @@ function renderMessage(m) {
   }
   const bubble = UI.el("div", "bubble" + (m.isStreaming ? " streaming" : ""));
   const who = UI.el("span", "who" + (clickable ? " who-click" : ""), roleLabel(m));
+  if (isScene) who.style.display = "none";
   if (clickable) who.addEventListener("click", () => setContextChar(c.id));
   const body = UI.el("div", "body");
-  if (m.image) {
+  if (isScene) {
+    if (m.isStreaming && !m.content) {
+      body.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+    } else {
+      body.innerHTML = sceneBlocksHtml(m.blocks);
+    }
+  } else if (m.image) {
     const imgEl = UI.el("img", "msg-img");
     imgEl.src = m.image;
     body.appendChild(imgEl);
@@ -3771,6 +4450,8 @@ function basePromptParts(c) {
   if (rl === "short") parts.push("Keep your responses short: roughly 1-2 paragraphs.");
   else if (rl === "medium") parts.push("Keep your responses medium length: roughly 3-5 paragraphs.");
   else if (rl === "long") parts.push("Write long, detailed responses with rich description.");
+  const story = storyInstructions(activeThread);
+  for (const line of story) parts.push(line);
   if (pfrpSettings.data.formatting && pfrpSettings.data.formatting.noEmDash) {
     parts.push("Writing style: never use the em-dash character. Use commas, periods, or other punctuation instead.");
   }
@@ -3848,6 +4529,7 @@ function currentSystemPromptFor(c) {
     const r = (txt) => applyTemplateVars(txt, c, persona);
     if (c.description) parts.push("Character: " + c.name + "\n" + r(c.description));
     if (c.personality) parts.push("Personality: " + r(c.personality));
+    if (c.attitude) parts.push("How they treat the user: " + r(c.attitude));
     if (c.appearance) parts.push("Appearance: " + r(c.appearance));
     if (c.scenario) parts.push("Scenario: " + r(c.scenario));
     if (c.mes_example) parts.push("Example dialogue (match this voice):\n" + r(c.mes_example));
@@ -3898,10 +4580,20 @@ function buildHistory(t) {
   const since = t.summarizedUpToOrder == null ? -1 : t.summarizedUpToOrder;
   return activeMessages
     .filter((m) => (m.role === "user" || m.role === "assistant") && !m._live && m.order > since)
-    .map((m) => ({
-      role: m.role,
-      content: m.image ? "[Image: " + (m.content || "attached image") + "]" : t.isGroup && m.role === "assistant" && m.name ? m.name + ": " + m.content : m.content,
-    }));
+    .flatMap((m) => {
+      if (m.blocks && m.blocks.length) {
+        return m.blocks.map((b) => ({
+          role: "assistant",
+          content: (b.narrator ? "[Narrator]: " : b.name + ": ") + b.content,
+        }));
+      }
+      return [
+        {
+          role: m.role,
+          content: m.image ? "[Image: " + (m.content || "attached image") + "]" : t.isGroup && m.role === "assistant" && m.name ? m.name + ": " + m.content : m.content,
+        },
+      ];
+    });
 }
 
 async function generateResponse(t, speaker, { guided = "", orderBase } = {}) {
@@ -3983,15 +4675,239 @@ async function directorNext(t) {
     .slice(-6)
     .map((m) => (m.role === "user" ? "{{user}}: " + m.content : (m.name || "assistant") + ": " + m.content))
     .join("\n\n");
-  const sys = `You are the scene director for a group roleplay. The characters are: ${names.join(", ")}. Read the conversation and decide whether another character should speak next to advance the scene (reacting, interjecting, or entering the scene because they are involved). Reply with ONLY that character's exact name, or the word NONE.`;
+  const sys = `You are the scene director for a group roleplay. The characters are: ${names.join(", ")}. Read the conversation and decide what happens next: reply with ONLY the exact name of a character who should speak to advance the scene (reacting, interjecting, or entering the scene because they are involved), or NARRATOR if a short third-person scene or setting beat fits better than another character line (use NARRATOR sparingly - never twice in a row), or NONE if the scene should wait for the user.`;
   try {
     const text = await Provider.complete([{ role: "user", content: recent }], { system: sys, temperature: 0.2, max_tokens: 8 });
     const clean = text.trim().replace(/["'.]/g, "");
     const c = members.find((m) => m.name.toLowerCase() === clean.toLowerCase());
     try { console.log("[AI] Director decision:", clean || "(empty)"); } catch {}
-    return c || null;
+    if (c) return c.name;
+    if (clean.toLowerCase() === "narrator") return "Narrator";
+    return null;
   } catch {
     return null;
+  }
+}
+
+function sceneMembers(t) {
+  const list = t.isGroup ? (t.characterIds || []).map((id) => characters.find((c) => c.id === id)) : [t.character];
+  return list.filter(Boolean);
+}
+
+function sceneSystemPrompt(t) {
+  const parts = basePromptParts(t.character || null);
+  const members = sceneMembers(t);
+  const persona = threadPersona(t);
+  const r = (txt, c) => applyTemplateVars(txt, c, persona);
+  const cards = members.map((c) => {
+    const lines = [];
+    if (c.appearance) lines.push("Appearance: " + r(c.appearance, c));
+    if (c.personality) lines.push("Personality: " + r(c.personality, c));
+    if (c.attitude) lines.push("Treats the user: " + r(c.attitude, c));
+    return c.name + ": " + lines.join("; ");
+  });
+  parts.push("Characters in this scene:\n" + cards.join("\n"));
+  const primary = members[0];
+  const lore = matchingLore(primary, t);
+  if (lore.length) {
+    parts.push("Relevant lore:\n" + lore.map((e) => (e.name ? `[${e.name}]\n` : "") + r(e.content, primary)).join("\n\n"));
+  }
+  parts.push(`Write the next scene segment. Switch between the characters above (and only those named above) as the moment demands, using this exact format:
+
+[Character Name]
+Their dialogue in "quotes" and *actions in asterisks*.
+
+[Narrator]
+Third-person narration describing the world, the pacing, or what happens between lines.
+
+Rules:
+- Each block starts with the name in [brackets] on its own line. Use ONLY the names listed above plus Narrator.
+- 2-6 blocks per response. Vary who speaks - do not let one character dominate.
+- Use Narrator blocks sparingly, when a beat of description or scene-setting improves the flow - never after every line.
+- Keep each block short and punchy - one beat, one thought.
+- End on a line that invites the user to respond.
+- Match the length of the user's reply, and drive the scene forward.`);
+  const expl = explicitnessLine();
+  if (expl) parts.push(expl);
+  return parts.join("\n\n");
+}
+
+function parseSceneBlocks(text, t) {
+  const lines = text.split("\n");
+  const raw = [];
+  let current = null;
+  for (const line of lines) {
+    const m = line.match(/^\s*\[(.+?)\]\s*$/);
+    if (m) {
+      if (current && current.content.trim()) raw.push(current);
+      current = { label: m[1].trim(), content: "" };
+    } else if (current) {
+      current.content += line + "\n";
+    } else {
+      if (!current) current = { label: "", content: "" };
+      current.content += line + "\n";
+    }
+  }
+  if (current && current.content.trim()) raw.push(current);
+  return raw
+    .map((b) => {
+      const c = characters.find((x) => (x.name || "").toLowerCase() === b.label.toLowerCase());
+      return {
+        speaker: b.label,
+        name: c ? c.name : b.label || "Narrator",
+        characterId: c ? c.id : null,
+        narrator: !c,
+        content: b.content.trim(),
+      };
+    })
+    .filter((b) => b.content);
+}
+
+function sceneBlocksHtml(blocks) {
+  return blocks
+    .map(
+      (b) => `<div class="scene-block${b.narrator ? " narrator" : ""}">
+        <div class="scene-who">${b.narrator ? UI.fa("book-open") + " Narrator" : esc(b.name)}</div>
+        <div class="scene-body">${formatText(b.content)}</div>
+      </div>`
+    )
+    .join("");
+}
+
+function updateLiveScene(threadId, msg) {
+  if (!activeThread || activeThread.id !== threadId) return;
+  const bubble = document.querySelector(".bubble.streaming");
+  if (bubble) {
+    const body = bubble.querySelector(".body");
+    if (body) {
+      body.innerHTML = sceneBlocksHtml(msg.blocks || []);
+      scrollToBottom();
+    }
+  }
+}
+
+async function generateScene(t, orderBase) {
+  const msg = {
+    threadId: t.id,
+    role: "assistant",
+    name: "Scene",
+    characterId: null,
+    content: "",
+    blocks: [],
+    creationTime: Date.now(),
+    order: orderBase,
+    isStreaming: true,
+    _live: true,
+  };
+  activeMessages.push(msg);
+  const ac = new AbortController();
+  streams.set(t.id, { ac, placeholder: msg });
+  renderAllMessages();
+  renderChatsDrawer();
+  updateComposerState();
+  const history = buildHistory(t);
+  const system = sceneSystemPrompt(t);
+  let full = "";
+  try {
+    for await (const chunk of Provider.stream(history, {
+      system,
+      temperature: t.temperature,
+      model: currentThreadModel(),
+      signal: ac.signal,
+    })) {
+      if (ac.signal.aborted) break;
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) {
+        full += delta;
+        msg.content = full;
+        msg.blocks = parseSceneBlocks(full, t);
+        updateLiveScene(t.id, msg);
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") UI.showToast("Scene failed: " + e.message, { type: "err" });
+  } finally {
+    streams.delete(t.id);
+    msg.isStreaming = false;
+    delete msg._live;
+    if (!full) full = ac.signal.aborted ? "(stopped)" : "(no response)";
+    msg.content = full;
+    msg.blocks = parseSceneBlocks(full, t);
+    const id = await pfrpDB.add("messages", msg);
+    msg.id = id;
+    if (!ac.signal.aborted) rememberModel(currentThreadModel());
+    t.lastMessageTime = Date.now();
+    t.updatedAt = Date.now();
+    await pfrpDB.put("threads", t);
+    await loadData();
+    activeThread = threads.find((x) => x.id === t.id) || null;
+    if (activeThread && activeThread.id === t.id) renderAllMessages();
+    renderChatsDrawer();
+    renderSpeakerRow();
+    updateComposerState();
+  }
+  return msg;
+}
+
+async function regenerateScene(t, m) {
+  const prevContent = m.content;
+  m.isStreaming = true;
+  m._live = true;
+  const ac = new AbortController();
+  streams.set(t.id, { ac, placeholder: m });
+  renderAllMessages();
+  renderChatsDrawer();
+  updateComposerState();
+  const history = activeMessages
+    .filter((x) => x.role === "user" || x.role === "assistant")
+    .filter((x) => !x._live)
+    .filter((x) => x.order <= m.order)
+    .filter((x) => x.order > (t.summarizedUpToOrder == null ? -1 : t.summarizedUpToOrder))
+    .flatMap((x) => {
+      if (x.blocks && x.blocks.length) {
+        return x.blocks.map((b) => ({ role: "assistant", content: (b.narrator ? "[Narrator]: " : b.name + ": ") + b.content }));
+      }
+      return [{ role: x.role, content: x.image ? "[Image: " + (x.content || "attached image") + "]" : t.isGroup && x.role === "assistant" && x.name ? x.name + ": " + x.content : x.content }];
+    });
+  const system = sceneSystemPrompt(t);
+  let full = "";
+  try {
+    for await (const chunk of Provider.stream(history, {
+      system,
+      temperature: t.temperature,
+      model: currentThreadModel(),
+      signal: ac.signal,
+    })) {
+      if (ac.signal.aborted) break;
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) {
+        full += delta;
+        m.content = full;
+        m.blocks = parseSceneBlocks(full, t);
+        updateLiveScene(t.id, m);
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") UI.showToast("Scene failed: " + e.message, { type: "err" });
+  } finally {
+    streams.delete(t.id);
+    m.isStreaming = false;
+    delete m._live;
+    if (full) {
+      normalizeGenerations(m);
+      m.variants.push(full);
+      m.genPos = m.variants.length - 1;
+      m.content = full;
+      m.blocks = parseSceneBlocks(full, t);
+      await pfrpDB.put("messages", m);
+      if (!ac.signal.aborted) rememberModel(currentThreadModel());
+    } else {
+      m.content = prevContent;
+    }
+    if (activeThread && activeThread.id === t.id) renderAllMessages();
+    renderChatsDrawer();
+    updateComposerState();
+    maybeSummarize(t);
   }
 }
 
@@ -4050,18 +4966,28 @@ async function sendMessage() {
     return;
   }
 
-  await generateResponse(t, speaker, { orderBase: userMsg.order + 1 });
+  if (t.sceneMode) {
+    await generateScene(t, userMsg.order + 1);
+  } else {
+    await generateResponse(t, speaker, { orderBase: userMsg.order + 1 });
 
-  if (t.isGroup && t.autoRespond !== false && t.multiTurn !== false && t.pendingSpeaker == null) {
-    let count = 1;
-    while (count < 3) {
-      const last = activeMessages[activeMessages.length - 1];
-      if (!last || last.role === "user") break;
-      const next = await directorNext(t);
-      if (!next) break;
-      const orderBase = activeMessages.length ? activeMessages[activeMessages.length - 1].order + 1 : 0;
-      await generateResponse(t, { character: next }, { orderBase });
-      count++;
+    if (t.isGroup && t.autoRespond !== false && t.multiTurn !== false && t.pendingSpeaker == null) {
+      let count = 1;
+      while (count < 3) {
+        const last = activeMessages[activeMessages.length - 1];
+        if (!last || last.role === "user") break;
+        const next = await directorNext(t);
+        if (!next) break;
+        const orderBase = activeMessages.length ? activeMessages[activeMessages.length - 1].order + 1 : 0;
+        if (next === "Narrator") {
+          await generateResponse(t, { narrator: true }, { orderBase });
+        } else {
+          const c = characters.find((x) => (x.name || "").toLowerCase() === next.toLowerCase());
+          if (!c) break;
+          await generateResponse(t, { character: c }, { orderBase });
+        }
+        count++;
+      }
     }
   }
 
@@ -4074,6 +5000,10 @@ async function regenerate(m) {
   if (m.role !== "assistant" || m._live) return;
   if (isGenerating(t.id)) {
     UI.showToast("A response is already generating in this chat", { type: "err" });
+    return;
+  }
+  if (m.blocks && m.blocks.length) {
+    await regenerateScene(t, m);
     return;
   }
   const idx = activeMessages.indexOf(m);
@@ -4098,10 +5028,17 @@ async function regenerate(m) {
     .filter((x) => !x._live)
     .filter((x) => x.order <= m.order)
     .filter((x) => x.order > (t.summarizedUpToOrder == null ? -1 : t.summarizedUpToOrder))
-    .map((x) => ({
-      role: x.role,
-      content: x.image ? "[Image: " + (x.content || "attached image") + "]" : t.isGroup && x.role === "assistant" && x.name ? x.name + ": " + x.content : x.content,
-    }));
+    .flatMap((x) => {
+      if (x.blocks && x.blocks.length) {
+        return x.blocks.map((b) => ({ role: "assistant", content: (b.narrator ? "[Narrator]: " : b.name + ": ") + b.content }));
+      }
+      return [
+        {
+          role: x.role,
+          content: x.image ? "[Image: " + (x.content || "attached image") + "]" : t.isGroup && x.role === "assistant" && x.name ? x.name + ": " + x.content : x.content,
+        },
+      ];
+    });
 
   const speaker = characters.find((c) => c.id === m.characterId) || t.character || null;
   const regenSystem = m.name === "Narrator" || m.characterId == null ? narratorSystemPrompt() : currentSystemPromptFor(speaker);
@@ -4185,6 +5122,7 @@ function inlineEdit(m, body) {
     m.variants.push(ta.value);
     m.genPos = m.variants.length - 1;
     m.content = ta.value;
+    if (m.blocks) m.blocks = parseSceneBlocks(m.content, activeThread);
     m.isEdited = true;
     await pfrpDB.put("messages", m);
     renderAllMessages();
@@ -4221,6 +5159,7 @@ async function switchGeneration(m, dir) {
   if (target === pos) return;
   m.content = m.variants[target];
   m.genPos = target;
+  if (m.blocks) m.blocks = parseSceneBlocks(m.content, activeThread);
   m.isEdited = true;
   await pfrpDB.put("messages", m);
   renderAllMessages();
@@ -4242,6 +5181,7 @@ async function editMessage(m) {
     m.variants.push(ta.value);
     m.genPos = m.variants.length - 1;
     m.content = ta.value;
+    if (m.blocks) m.blocks = parseSceneBlocks(m.content, activeThread);
     m.isEdited = true;
     await pfrpDB.put("messages", m);
     overlay.remove();
@@ -4391,6 +5331,7 @@ function renderContextCharacter(wrap, c, t) {
     const r = (txt) => applyTemplateVars(txt, c, persona);
     pcard.appendChild(UI.el("div", "field", `<b>Description</b><br>${esc(r(c.description) || "None")}`));
     pcard.appendChild(UI.el("div", "field", `<b>Personality</b><br>${esc(r(c.personality) || "None")}`));
+    pcard.appendChild(UI.el("div", "field", `<b>How they treat you</b><br>${esc(r(c.attitude) || "None")}`));
     pcard.appendChild(UI.el("div", "field", `<b>Appearance</b><br>${esc(r(c.appearance) || "None")}`));
     pcard.appendChild(UI.el("div", "field", `<b>Scenario</b><br>${esc(r(c.scenario) || "None")}`));
     pcard.appendChild(UI.el("div", "field", `<b>First message</b><br>${esc(r(c.first_mes) || "None")}`));
@@ -4436,6 +5377,30 @@ function renderContextChat(wrap, t) {
     t.explicitness = v;
     await pfrpDB.put("threads", t);
   }));
+  settings.appendChild(UI.el("div", "spacer-h", ""));
+
+  const smRow = UI.el("div", "rowline");
+  smRow.appendChild(UI.el("span", "", "Scene mode"));
+  const smSw = UI.el("div", "switch" + (t.sceneMode ? " on" : ""));
+  smSw.addEventListener("click", async () => {
+    t.sceneMode = !t.sceneMode;
+    smSw.classList.toggle("on", t.sceneMode);
+    await pfrpDB.put("threads", t);
+  });
+  smRow.appendChild(smSw);
+  settings.appendChild(smRow);
+  settings.appendChild(UI.el("div", "hint", "One response writes the whole scene - several characters and narrator beats interleaved, regenerated and deleted as a single unit."));
+  settings.appendChild(UI.el("div", "spacer-h", ""));
+
+  settings.appendChild(UI.el("label", "field-label", "Story"));
+  settings.appendChild(storyControls(
+    (k) => storySetting(t, k),
+    async (k, v) => {
+      t[k] = v;
+      await pfrpDB.put("threads", t);
+    }
+  ));
+  settings.appendChild(UI.el("div", "hint", "Overrides the global story defaults for this chat."));
   settings.appendChild(UI.el("div", "spacer-h", ""));
   if (t.isGroup) {
     const arRow = UI.el("div", "rowline");

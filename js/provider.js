@@ -29,13 +29,12 @@ const Provider = {
   async requestJson(path, options) {
     const res = await fetch(this.baseUrl() + path, options);
     if (!res.ok) {
-      let detail = "";
+      const raw = await res.text();
+      let detail = raw;
       try {
-        const data = await res.json();
-        detail = data.error?.message || data.message || JSON.stringify(data);
-      } catch {
-        detail = await res.text();
-      }
+        const data = JSON.parse(raw);
+        detail = data.error?.message || data.message || raw;
+      } catch {}
       const err = new Error(detail || "HTTP " + res.status);
       err.status = res.status;
       throw err;
@@ -76,13 +75,12 @@ const Provider = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      let detail = "";
+      const raw = await res.text();
+      let detail = raw;
       try {
-        const data = await res.json();
-        detail = data.error?.message || JSON.stringify(data);
-      } catch {
-        detail = await res.text();
-      }
+        const data = JSON.parse(raw);
+        detail = data.error?.message || raw;
+      } catch {}
       throw new Error(detail || "HTTP " + res.status);
     }
     return res.json();
@@ -99,13 +97,12 @@ const Provider = {
       signal: opts.signal,
     });
     if (!res.ok || !res.body) {
-      let detail = "";
+      const raw = await res.text();
+      let detail = raw;
       try {
-        const data = await res.json();
-        detail = data.error?.message || JSON.stringify(data);
-      } catch {
-        detail = await res.text();
-      }
+        const data = JSON.parse(raw);
+        detail = data.error?.message || raw;
+      } catch {}
       throw new Error(detail || "HTTP " + res.status);
     }
     const reader = res.body.getReader();
@@ -152,13 +149,12 @@ const Provider = {
       signal: opts.signal,
     });
     if (!res.ok) {
-      let detail = "";
+      const raw = await res.text();
+      let detail = raw;
       try {
-        const data = await res.json();
-        detail = data.error?.message || JSON.stringify(data);
-      } catch {
-        detail = await res.text();
-      }
+        const data = JSON.parse(raw);
+        detail = data.error?.message || raw;
+      } catch {}
       throw new Error(detail || "HTTP " + res.status);
     }
     const data = await res.json();

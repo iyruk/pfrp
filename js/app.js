@@ -2950,7 +2950,30 @@ function deepFindCharacter(node, depth = 0) {
   return null;
 }
 
+function corsFriendlyHost(url) {
+  try {
+    const origin = new URL(url).origin;
+    return (
+      origin.endsWith("jsdelivr.net") ||
+      origin.endsWith("catbox.moe") ||
+      (origin.endsWith("huggingface.co") && url.includes("/resolve/")) ||
+      origin === "https://raw.githubusercontent.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function fetchPageViaProxy(url, signal) {
+  if (corsFriendlyHost(url)) {
+    try {
+      const direct = await fetch(url, { signal });
+      if (direct.ok) {
+        const text = await direct.text();
+        if (text && text.length >= 60) return text;
+      }
+    } catch {}
+  }
   const custom = (pfrpSettings.data.urlProxy || "").trim();
   if (custom) {
     try {
@@ -3176,6 +3199,15 @@ function extractImageUrl(html) {
 }
 
 async function fetchBlobViaProxy(url, signal) {
+  if (corsFriendlyHost(url)) {
+    try {
+      const direct = await fetch(url, { signal });
+      if (direct.ok) {
+        const blob = await direct.blob();
+        if (blob && blob.size > 40) return blob;
+      }
+    } catch {}
+  }
   const custom = (pfrpSettings.data.urlProxy || "").trim();
   if (custom) {
     try {
@@ -3242,12 +3274,20 @@ async function tryAicharactercards(url, signal) {
 }
 
 async function tryCharacterTavern(url, signal) {
-  if (!/character-tavern\.com\/character\//i.test(url)) return null;
-  let cardUrl = url.replace(/^https:\/\/(www\.)?character-tavern\.com\/character\//i, "https://ct-cards.storage.character-tavern.com/").split("?")[0] + ".png";
-  if (/^https:\/\/cards\.character-tavern\.com\//i.test(url)) {
-    cardUrl = "https://ct-cards.storage.character-tavern.com/" + url.split("?")[0].replace(/^https:\/\/cards\.character-tavern\.com\//i, "");
+  const m = String(url).match(/(?:character-tavern\.com|tavern\.com)\/character\/([^?#]+)/i);
+  if (!m) return null;
+  const path = m[1].split("?")[0];
+  const cardUrl = "https://ct-cards.storage.character-tavern.com/" + path + ".png";
+  let blob = null;
+  try {
+    const direct = await fetch(cardUrl, { signal });
+    if (direct.ok) {
+      blob = await direct.blob();
+    }
+  } catch {}
+  if (!blob || blob.size <= 40) {
+    blob = await fetchBlobViaProxy(cardUrl, signal);
   }
-  const blob = await fetchBlobViaProxy(cardUrl, signal);
   return await cardRecordFromBlob(blob, "card.png");
 }
 

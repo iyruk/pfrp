@@ -13,7 +13,7 @@ const Import = {
   async parseFile(file) {
     const name = (file.name || "").toLowerCase();
     if (name.endsWith(".png")) {
-      return [this.parseCardPng(await this.readAsArrayBuffer(file))];
+      return [await this.parseCardPng(await this.readAsArrayBuffer(file))];
     }
     if (name.endsWith(".json")) {
       const text = await file.text();
@@ -41,12 +41,12 @@ const Import = {
     throw new Error("Unrecognized character format.");
   },
 
-  parseCardPng(buffer) {
+  async parseCardPng(buffer) {
     const bytes = new Uint8Array(buffer);
     const chunks = readPngChunks(bytes);
     for (const c of chunks) {
       if (c.type === "tEXt" || c.type === "iTXt" || c.type === "zTXt") {
-        const text = decodeTextChunk(c, bytes);
+        const text = await decodeTextChunk(c, bytes);
         if (text && text.keyword === "chara") {
           let json;
           try {
@@ -230,6 +230,22 @@ function decodeTextChunk(chunk, bytes) {
     if (compressed === 1) return null;
     const text = new TextDecoder().decode(data.subarray(nul3 + 2));
     return { keyword, text };
+  }
+  if (chunk.type === "zTXt") {
+    const nul = data.indexOf(0);
+    if (nul < 0) return null;
+    const keyword = String.fromCharCode.apply(null, data.subarray(0, nul));
+    const method = data[nul + 1];
+    if (method !== 0) return null;
+    const comp = data.subarray(nul + 2);
+    try {
+      const ds = new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate"));
+      return new Response(ds)
+        .arrayBuffer()
+        .then((buf) => ({ keyword, text: new TextDecoder().decode(buf) }));
+    } catch {
+      return null;
+    }
   }
   return null;
 }

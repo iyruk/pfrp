@@ -3004,6 +3004,27 @@ async function fetchPageViaProxy(url, signal) {
   throw lastErr || new Error("Could not fetch the page");
 }
 
+async function fillPfrpFields(rec, signal) {
+  try {
+    const converted = await aiConvertCharacter(rec, signal);
+    const merged = Object.assign({}, converted, rec);
+    for (const k of ["name", "personality", "attitude", "appearance", "scenario", "first_mes", "mes_example"]) {
+      if (!String(merged[k] || "").trim() && String(converted[k] || "").trim()) merged[k] = converted[k];
+    }
+    return merged;
+  } catch {
+    return rec;
+  }
+}
+
+function needsPfrpFill(rec) {
+  return !!(
+    rec &&
+    String(rec.description || "").trim() &&
+    ["personality", "attitude", "appearance", "scenario", "first_mes", "mes_example"].some((k) => !String(rec[k] || "").trim())
+  );
+}
+
 function aiCharacterFromUrl() {
   const PARSER_SYS = 'You are a character card parser. Given raw content from a web page about a character, return ONLY valid JSON with these fields: {"name": string, "tagline": string (short, 3-6 words), "description": string (detailed persona/backstory), "personality": string (comma-separated traits), "attitude": string (one line on how the character acts toward the user), "appearance": string, "scenario": string (a short setting/situation to start a roleplay), "first_mes": string (an opening message spoken by the character), "mes_example": string (one short example dialogue exchange)}. Preserve all facts from the input; do not invent new ones. No markdown fences, no extra text.';
   const wrap = UI.el("div", "");
@@ -3012,6 +3033,11 @@ function aiCharacterFromUrl() {
   inp.type = "url";
   inp.placeholder = "https://...";
   wrap.appendChild(inp);
+  const convRow = UI.el("label", "checkbox-row");
+  const convCb = UI.el("input", "");
+  convCb.type = "checkbox";
+  convRow.append(convCb, UI.el("span", "", "Convert to PFRP format (fills in missing fields with AI)"));
+  wrap.appendChild(convRow);
   const status = UI.el("div", "hint");
 
   const pasteCtn = UI.el("div", "form-group");
@@ -3054,6 +3080,7 @@ function aiCharacterFromUrl() {
       return;
     }
     gen.disabled = true;
+    gen.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Working...';
     status.textContent = "Looking for a character card...";
     try {
       const ac = new AbortController();
@@ -3071,6 +3098,10 @@ function aiCharacterFromUrl() {
         }
       }
       if (cardRecord) {
+        if (convCb.checked && needsPfrpFill(cardRecord)) {
+          status.textContent = "Converting the card to PFRP format...";
+          cardRecord = await fillPfrpFields(cardRecord, ac.signal);
+        }
         status.textContent = "Card found - opening the editor...";
         overlay.remove();
         openCharacterEditor(cardRecord);
@@ -3129,19 +3160,25 @@ function aiCharacterFromUrl() {
       status.textContent = "Building the character...";
       const text = await Provider.complete([{ role: "user", content: hint }], { system: sys, temperature: 0.4 });
       const cleaned = text.replace(/```json|```/g, "").trim();
-      const data = JSON.parse(cleaned);
+      let data = JSON.parse(cleaned);
+      if (convCb.checked && needsPfrpFill(data)) {
+        status.textContent = "Filling in the PFRP fields...";
+        data = await fillPfrpFields(Object.assign({ name: data.name, description: data.description }, data), ac.signal);
+      }
       overlay.remove();
       openCharacterEditor(Object.assign({}, fields, data, avatarDataUrl ? { avatar: avatarDataUrl } : {}));
     } catch (e) {
-      status.textContent = "Failed: " + e.message;
+      status.textContent = "Failed: " + e.message + "  -  this site may block automatic fetching. Set a URL fetch proxy in Settings > Connection, or paste the page content below.";
       pasteCtn.style.display = "";
       gen.disabled = false;
+      gen.innerHTML = UI.fa("wand-magic-sparkles") + " Create character";
     }
   });
   row.append(cancel, gen);
   wrap.appendChild(row);
   wrap.appendChild(status);
   const overlay = UI.openModal(wrap, { title: "Create character from URL", wide: true });
+  inp.focus();
 }
 
 function wikiPageInfo(url) {
@@ -3266,11 +3303,64 @@ async function cardRecordFromBlob(blob, name) {
   return rec;
 }
 
+async function fetchJsonViaProxy(url, signal) {
+  const custom = (pfrpSettings.data.urlProxy || "").trim();
+  if (custom) {
+    try {
+      const res = await fetch(custom + encodeURIComponent(url), { signal });
+      if (res.ok) return await res.json();
+    } catch {}
+  }
+  const proxies = [
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  ];
+  let lastErr = null;
+  for (const p of proxies) {
+    try {
+      const res = await fetch(p(url), { signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Could not fetch the data");
+}
+
 async function tryAicharactercards(url, signal) {
   const m = String(url).match(/aicharactercards\.com\/cards\/([0-9]+)/i);
   if (!m) return null;
-  const blob = await fetchBlobViaProxy("https://api.aicharactercards.com/api/cards/" + m[1] + "/download", signal);
-  return await cardRecordFromBlob(blob, "card.png");
+  const id = m[1];
+  try {
+    const blob = await fetchBlobViaProxy("https://api.aicharactercards.com/api/cards/" + id + "/download", signal);
+    const rec = await cardRecordFromBlob(blob, "card.png");
+    if (rec) return rec;
+  } catch (e) {
+    console.warn("aicharactercards download failed:", e && e.message);
+  }
+  try {
+    const json = await fetchJsonViaProxy("https://api.aicharactercards.com/api/cards/" + id, signal);
+    if (json && (json.title || json.description)) {
+      let avatar = "";
+      if (json.imageUrl) {
+        const imgUrl = /^https?:\/\//i.test(json.imageUrl) ? json.imageUrl : "https://aicharactercards.com" + (json.imageUrl.startsWith("/") ? "" : "/") + json.imageUrl;
+        try {
+          avatar = await fetchImageAsDataUrl(imgUrl, signal);
+        } catch {}
+      }
+      return {
+        name: json.title || "",
+        tagline: (json.tags && json.tags.join(", ")) || "",
+        description: json.description || "",
+        avatar,
+      };
+    }
+  } catch (e) {
+    console.warn("aicharactercards JSON failed:", e && e.message);
+  }
+  return null;
 }
 
 async function tryCharacterTavern(url, signal) {

@@ -46,6 +46,7 @@ let characters = [];
 let threads = [];
 let activeThread = null;
 let activeCharacter = null;
+let activeScene = null;
 let contextChar = null;
 let activeMessages = [];
 let streams = new Map();
@@ -62,6 +63,7 @@ let chatSort = "updated";
 let chatFolderFilter = "";
 let loreEntries = [];
 let imageRecords = [];
+let scenes = [];
 let settingsShowTab = null;
 
 function isConverting(c) {
@@ -431,6 +433,7 @@ function hexToRgba(hex, a) {
 const DRAWERS = {
   chats: { icon: "comments", title: "Chats", build: renderChatsDrawer, create: "chat", folders: "threads" },
   chars: { icon: "masks-theater", title: "Characters", build: renderCharsDrawer, create: "char", folders: "characters" },
+  scenes: { icon: "film", title: "Scenes", build: renderScenesDrawer, create: "scene" },
   images: { icon: "images", title: "Images", build: renderImagesDrawer, create: "image" },
   lore: { icon: "book", title: "Lore", build: renderLoreDrawer, create: "lore" },
 };
@@ -477,6 +480,14 @@ function restoreDrawerSelection(key) {
     }
     clearCenterSelection();
     renderEmptySelection("chars");
+  } else if (key === "scenes") {
+    const lastId = pfrpSettings.data.ui.lastOpen && pfrpSettings.data.ui.lastOpen.scenes;
+    if (lastId && scenes.some((s) => s.id === lastId)) {
+      viewScene(lastId);
+      return;
+    }
+    clearCenterSelection();
+    renderEmptySelection("scenes");
   } else {
     clearCenterSelection();
     renderEmptySelection(key);
@@ -486,6 +497,7 @@ function restoreDrawerSelection(key) {
 function clearCenterSelection() {
   activeThread = null;
   activeCharacter = null;
+  activeScene = null;
   activeMessages = [];
   contextChar = null;
   renderCenter();
@@ -1108,6 +1120,338 @@ function matchingLore(c, t) {
     if (!keys.length) return true;
     return keys.some((k) => recent.includes(k));
   });
+}
+
+function renderScenesDrawer() {
+  const wrap = UI.el("div", "");
+  if (!scenes.length) {
+    wrap.appendChild(UI.el("div", "empty", `<p>No scenes yet. A scene bundles a setting with its characters, so you can start chats from it with one click.</p>`));
+  }
+  const list = scenes.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  for (const s of list) {
+    const ids = (s.characterIds || []).filter((id) => characters.some((c) => c.id === id));
+    const item = UI.el("div", "d-item scene-item");
+    item.dataset.scene = s.id;
+    const icHtml = s.avatar && s.avatar.startsWith("data:")
+      ? `<div class="av" style="background:linear-gradient(135deg,var(--accent1),var(--accent2))"><img src="${s.avatar}" alt=""></div>`
+      : `<div class="lore-ic">${UI.fa("film")}</div>`;
+    item.innerHTML = `${icHtml}
+      <div class="d-body"><div class="d-name">${esc(s.name || "Unnamed scene")}</div><div class="d-sub">${esc(s.tagline || s.scenario || "")}${ids.length ? " · " + ids.length + (ids.length === 1 ? " character" : " characters") : ""}</div></div>
+      <button class="d-menu" data-scenemenu="${s.id}" title="More">${UI.fa("ellipsis")}</button>`;
+    item.querySelector("[data-scenemenu]").addEventListener("click", (e) => {
+      e.stopPropagation();
+      showMenu(item.querySelector("[data-scenemenu]"), [
+        { icon: "pen", label: "Edit scene", onClick: () => openSceneEditor(s) },
+        { icon: "trash", label: "Delete scene", danger: true, onClick: async () => {
+          const ok = await UI.confirmModal({ title: "Delete scene?", message: `"${s.name || "Unnamed"}" will be permanently deleted. Chats using it keep their text.`, confirmText: "Delete" });
+          if (!ok) return;
+          await pfrpDB.del("scenes", s.id);
+          await loadData();
+          UI.showToast("Scene deleted");
+        } },
+      ]);
+    });
+    item.addEventListener("click", (e) => {
+      if (e.target.closest("[data-scenemenu]")) return;
+      viewScene(s.id);
+    });
+    wrap.appendChild(item);
+  }
+  els.dList.innerHTML = "";
+  els.dList.appendChild(wrap);
+}
+
+function viewScene(id) {
+  const s = scenes.find((x) => x.id === id);
+  if (!s) return;
+  activeScene = s;
+  activeThread = null;
+  activeCharacter = null;
+  activeMessages = [];
+  contextChar = null;
+  closeCtxPanelVisual();
+  setDrawerOpen(true);
+  pfrpSettings.data.ui.lastOpen = pfrpSettings.data.ui.lastOpen || {};
+  pfrpSettings.data.ui.lastOpen.scenes = id;
+  pfrpSettings.save();
+  renderCenter();
+  els.dList.querySelectorAll(".d-item[data-scene]").forEach((el) => {
+    el.classList.toggle("active", parseInt(el.dataset.scene) === id);
+  });
+  renderContext();
+}
+
+function renderSceneView(s) {
+  els.chatName.textContent = s.name || "Scene";
+  els.chatSub.textContent = s.tagline || "Scene";
+  els.chatAvatar.innerHTML = s.avatar && s.avatar.startsWith("data:") ? `<img src="${s.avatar}" alt="">` : (s.name ? s.name[0].toUpperCase() : "+");
+  els.chatAvatar.style.background = "linear-gradient(135deg,var(--accent1),var(--accent2))";
+  els.msgsInner.innerHTML = "";
+
+  const view = UI.el("div", "char-view");
+  view.appendChild(UI.el("div", "char-view-av", s.avatar && s.avatar.startsWith("data:") ? `<img src="${s.avatar}" alt="">` : (s.name ? s.name[0].toUpperCase() : "+")));
+  view.appendChild(UI.el("h2", "char-view-name", esc(s.name || "Unnamed scene")));
+  if (s.tagline) view.appendChild(UI.el("p", "char-view-tag", esc(s.tagline)));
+
+  const actions = UI.el("div", "char-view-actions");
+  const start = UI.el("button", "btn primary", UI.fa("comment") + " Start chat");
+  start.addEventListener("click", () => startChatFromScene(s));
+  const edit = UI.el("button", "btn", UI.fa("pen") + " Edit");
+  edit.addEventListener("click", () => openSceneEditor(s));
+  actions.append(start, edit);
+  view.appendChild(actions);
+
+  const body = UI.el("div", "char-view-body");
+  if (s.scenario) {
+    const card = UI.el("div", "char-view-sec");
+    card.appendChild(UI.el("h3", "", `${UI.fa("map")} Scenario`));
+    card.appendChild(UI.el("div", "char-view-sec-body", renderMarkdown(s.scenario)));
+    body.appendChild(card);
+  }
+  if (s.intro) {
+    const card = UI.el("div", "char-view-sec");
+    card.appendChild(UI.el("h3", "", `${UI.fa("clapperboard")} Opening`));
+    const t = activeThread || { characterIds: s.characterIds };
+    const introBlocks = parseSceneBlocks(s.intro, t);
+    card.appendChild(UI.el("div", "char-view-sec-body opening-body", sceneOpeningHtml(introBlocks.length ? introBlocks : [{ narrator: true, name: "Narrator", content: s.intro }])));
+    body.appendChild(card);
+  }
+  const chars = (s.characterIds || []).map((id) => characters.find((c) => c.id === id)).filter(Boolean);
+  if (chars.length) {
+    const card = UI.el("div", "char-view-sec");
+    card.appendChild(UI.el("h3", "", `${UI.fa("masks-theater")} Characters`));
+    const row = UI.el("div", "scene-chars");
+    for (const c of chars) {
+      const cell = UI.el("div", "scene-char");
+      cell.appendChild(UI.el("div", "", avatarHtml(c, "")));
+      cell.appendChild(UI.el("span", "", esc(c.name)));
+      cell.addEventListener("click", () => viewCharacter(c.id));
+      row.appendChild(cell);
+    }
+    card.appendChild(row);
+    body.appendChild(card);
+  }
+  view.appendChild(body);
+  els.msgsInner.appendChild(view);
+  els.msgs.scrollTop = 0;
+}
+
+function openSceneEditor(scene) {
+  const isNew = !scene;
+  const s = scene || { name: "", tagline: "", scenario: "", characterIds: [], avatar: "" };
+  const wrap = UI.el("div", "");
+  const upLabel = UI.el("label", "avatar-upload");
+  const avInput = UI.el("input", "input");
+  avInput.type = "file";
+  avInput.accept = "image/*";
+  const avPrev = UI.el("div", "av", s.avatar ? "" : "F");
+  if (s.avatar) avPrev.innerHTML = `<img src="${s.avatar}" alt="">`;
+  avPrev.appendChild(UI.el("span", "avatar-edit", UI.fa("camera") + " <span>Change</span>"));
+  upLabel.append(avInput, avPrev);
+  let avatarData = s.avatar || "";
+  avInput.addEventListener("change", () => {
+    const file = avInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      avatarData = reader.result;
+      avPrev.innerHTML = `<img src="${avatarData}" alt="">`;
+      avPrev.appendChild(UI.el("span", "avatar-edit", UI.fa("camera") + " <span>Change</span>"));
+    };
+    reader.readAsDataURL(file);
+  });
+  wrap.appendChild(upLabel);
+  const gName = UI.el("div", "form-group");
+  gName.appendChild(UI.el("label", "field-label", "Name"));
+  const nameIn = UI.el("input", "input");
+  nameIn.value = s.name || "";
+  gName.appendChild(nameIn);
+  wrap.appendChild(gName);
+  const gTag = UI.el("div", "form-group");
+  gTag.appendChild(UI.el("label", "field-label", "Tagline"));
+  const tagIn = UI.el("input", "input");
+  tagIn.value = s.tagline || "";
+  gTag.appendChild(tagIn);
+  wrap.appendChild(gTag);
+  const gScen = UI.el("div", "form-group");
+  gScen.appendChild(UI.el("label", "field-label", "Scenario / setting"));
+  const scenIn = UI.el("textarea", "textarea");
+  scenIn.rows = 4;
+  scenIn.value = s.scenario || "";
+  gScen.appendChild(scenIn);
+  wrap.appendChild(gScen);
+  const gIntro = UI.el("div", "form-group");
+  gIntro.appendChild(UI.el("label", "field-label", "Opening scene (optional)"));
+  const introIn = UI.el("textarea", "textarea");
+  introIn.rows = 6;
+  introIn.value = s.intro || "";
+  introIn.placeholder = "[Rena]\n*grins from the doorway* \"Well, well...\"\n\n[Narrator]\nThe hallway goes quiet.";
+  gIntro.appendChild(introIn);
+  gIntro.appendChild(UI.el("div", "hint", "Posted as the first message when a chat starts from this scene. Use [Name] blocks for each speaker and [Narrator] for narration."));
+  wrap.appendChild(gIntro);
+  const gChars = UI.el("div", "form-group");
+  gChars.appendChild(UI.el("label", "field-label", "Characters"));
+  const charBoxes = [];
+  const charList = UI.el("div", "folder-pick");
+  const selected = new Set(s.characterIds || []);
+  for (const c of characters) {
+    const lab = UI.el("label", "checkbox-row");
+    const cb = UI.el("input", "");
+    cb.type = "checkbox";
+    cb.checked = selected.has(c.id);
+    charBoxes.push({ cb, c });
+    lab.append(cb, UI.el("span", "", esc(c.name)));
+    charList.appendChild(lab);
+  }
+  gChars.appendChild(charList);
+  if (!characters.length) gChars.appendChild(UI.el("div", "hint", "No characters yet. You can add them later by editing the scene."));
+  wrap.appendChild(gChars);
+
+  const act = UI.el("div", "modal-actions");
+  const cancel = UI.el("button", "btn ghost", "Cancel");
+  cancel.addEventListener("click", () => overlay.remove());
+  const save = UI.el("button", "btn primary", UI.fa("floppy-disk") + (isNew ? " Create scene" : " Save"));
+  save.addEventListener("click", async () => {
+    const record = Object.assign({}, s, {
+      name: nameIn.value.trim() || "Unnamed scene",
+      tagline: tagIn.value.trim(),
+      scenario: scenIn.value.trim(),
+      intro: introIn.value.trim(),
+      characterIds: charBoxes.filter((b) => b.cb.checked).map((b) => b.c.id),
+      avatar: avatarData,
+      updatedAt: Date.now(),
+    });
+    if (isNew) {
+      record.createdAt = Date.now();
+      await pfrpDB.add("scenes", record);
+    } else {
+      await pfrpDB.put("scenes", record);
+    }
+    overlay.remove();
+    await loadData();
+    UI.showToast(isNew ? "Scene created" : "Scene saved");
+  });
+  act.append(cancel, save);
+  wrap.appendChild(act);
+  const overlay = UI.openModal(wrap, { title: isNew ? "New scene" : "Edit scene", wide: true });
+}
+
+async function startChatFromScene(scene) {
+  const ids = (scene.characterIds || []).filter((id) => characters.some((c) => c.id === id));
+  if (!ids.length) {
+    UI.showToast("This scene has no characters yet - edit it to add some", { type: "err" });
+    return;
+  }
+  const personaId = pfrpSettings.data.activePersonaId;
+  let id = null;
+  if (ids.length === 1) {
+    id = await createChatWithCharacter(ids[0], personaId);
+  } else {
+    id = await createGroupThread(ids, personaId);
+  }
+  const t = threads.find((x) => x.id === id);
+  if (t) {
+    if (scene.scenario) {
+      t.sceneId = scene.id;
+      t.scenario = scene.scenario;
+    }
+    await pfrpDB.put("threads", t);
+  }
+  if (t && scene.intro) {
+    const blocks = parseSceneBlocks(scene.intro, t);
+    if (blocks.length) {
+      const msg = {
+        threadId: t.id,
+        role: "assistant",
+        name: "Scene",
+        characterId: null,
+        content: scene.intro,
+        blocks,
+        creationTime: Date.now(),
+        order: 0,
+      };
+      const mid = await pfrpDB.add("messages", msg);
+      msg.id = mid;
+      activeMessages.push(msg);
+      renderAllMessages();
+    }
+  }
+}
+
+function sceneChooserModal(characterIds, personaId, isGroup) {
+  const wrap = UI.el("div", "");
+  wrap.appendChild(UI.el("p", "modal-desc", "Start this chat inside a scene (a saved world/setting), or just jump in?"));
+  wrap.appendChild(choiceCard("ban", "No scene", "Start the chat immediately", () => {
+    overlay.remove();
+    if (isGroup) createGroupThread(characterIds, personaId);
+    else startChatWithCharacter(characterIds[0], personaId);
+  }));
+  wrap.appendChild(choiceCard("film", "Pick a scene", "Use one of your saved scenes", () => {
+    overlay.remove();
+    pickSceneModal();
+  }));
+  wrap.appendChild(choiceCard("plus", "Quick scene", "Type a short setting right now (not saved)", () => {
+    overlay.remove();
+    quickSceneModal(characterIds, personaId, isGroup);
+  }));
+  const overlay = UI.openModal(wrap, { title: "Start with a scene?" });
+}
+
+function pickSceneModal() {
+  const wrap = UI.el("div", "");
+  if (!scenes.length) {
+    wrap.appendChild(UI.el("div", "hint", "No saved scenes yet. Create one from the Scenes tab."));
+  }
+  for (const s of scenes.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) {
+    const ids = (s.characterIds || []).filter((id) => characters.some((c) => c.id === id));
+    const row = UI.el("button", "frow", `${UI.fa("film")} ${esc(s.name || "Unnamed")}`);
+    row.addEventListener("click", () => {
+      overlay.remove();
+      startChatFromScene(s);
+    });
+    wrap.appendChild(row);
+    if (s.tagline || ids.length) wrap.appendChild(UI.el("div", "hint", esc((s.tagline ? s.tagline + " · " : "") + (ids.length ? ids.length + (ids.length === 1 ? " character" : " characters") : ""))));
+  }
+  const overlay = UI.openModal(wrap, { title: "Pick a scene" });
+}
+
+function quickSceneModal(characterIds, personaId, isGroup) {
+  const wrap = UI.el("div", "");
+  const gName = UI.el("div", "form-group");
+  gName.appendChild(UI.el("label", "field-label", "Scene name (optional)"));
+  const nameIn = UI.el("input", "input");
+  gName.appendChild(nameIn);
+  wrap.appendChild(gName);
+  const gScen = UI.el("div", "form-group");
+  gScen.appendChild(UI.el("label", "field-label", "Setting"));
+  const scenIn = UI.el("textarea", "textarea");
+  scenIn.rows = 3;
+  scenIn.placeholder = "e.g. A rainy night in a neon city, the power flickering...";
+  gScen.appendChild(scenIn);
+  wrap.appendChild(gScen);
+  const act = UI.el("div", "modal-actions");
+  const cancel = UI.el("button", "btn ghost", "Cancel");
+  cancel.addEventListener("click", () => overlay.remove());
+  const start = UI.el("button", "btn primary", UI.fa("play") + " Start");
+  start.addEventListener("click", async () => {
+    const scenario = scenIn.value.trim();
+    overlay.remove();
+    let id = null;
+    if (isGroup) {
+      id = await createGroupThread(characterIds, personaId);
+    } else {
+      id = await startChatWithCharacter(characterIds[0], personaId);
+    }
+    const t = threads.find((x) => x.id === id);
+    if (t && scenario) {
+      t.scenario = scenario;
+      await pfrpDB.put("threads", t);
+      if (activeThread && activeThread.id === id) renderThreadUI();
+    }
+  });
+  act.append(cancel, start);
+  wrap.appendChild(act);
+  const overlay = UI.openModal(wrap, { title: "Quick scene" });
 }
 
 const summarizingThreads = new Set();
@@ -2965,43 +3309,261 @@ function corsFriendlyHost(url) {
 }
 
 async function fetchPageViaProxy(url, signal) {
+  const attempts = [];
   if (corsFriendlyHost(url)) {
     try {
       const direct = await fetch(url, { signal });
+      attempts.push("direct:" + direct.status);
       if (direct.ok) {
         const text = await direct.text();
         if (text && text.length >= 60) return text;
       }
-    } catch {}
+    } catch (e) {
+      attempts.push("direct:" + (e && e.name));
+    }
   }
   const custom = (pfrpSettings.data.urlProxy || "").trim();
   if (custom) {
     try {
       const res = await fetch(custom + encodeURIComponent(url), { signal });
+      attempts.push("custom:" + res.status);
       if (res.ok) {
         const text = await res.text();
         if (text && text.length >= 60) return text;
       }
-    } catch {}
+    } catch (e) {
+      attempts.push("custom:" + (e && e.name));
+    }
   }
   const proxies = [
-    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
-    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+    ["allorigins", (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)],
+    ["corsproxy", (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u)],
+    ["codetabs", (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)],
   ];
   let lastErr = null;
-  for (const p of proxies) {
+  for (const [name, p] of proxies) {
     try {
       const res = await fetch(p(url), { signal });
+      attempts.push(name + ":" + res.status);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const text = await res.text();
-      if (!text || text.length < 60) throw new Error("Page is empty");
+      if (!text || text.length < 60) throw new Error("empty");
+      console.log("[URL] fetched via " + name + ": " + url + " (" + text.length + " chars)");
       return text;
     } catch (e) {
       lastErr = e;
+      console.warn("[URL] " + name + " failed for " + url + ": " + (e && e.message));
     }
   }
-  throw lastErr || new Error("Could not fetch the page");
+  const detail = new Error("all fetch routes failed (" + attempts.join(", ") + ")");
+  console.warn("[URL] giving up on " + url + "  -  " + attempts.join(", "));
+  throw detail;
+}
+
+function extractCharacterImages(html) {
+  const map = {};
+  const re = /<img[^>]+alt="Profile image of ([^"]+)"[^>]*>/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    const name = m[1].trim();
+    const tag = m[0];
+    const srcSet = (tag.match(/srcSet="([^"]+)/i) || [])[1];
+    const src = (tag.match(/src="([^"]+)"/i) || [])[1];
+    const url = (srcSet ? srcSet.split(/\s+/)[0] : src) || "";
+    if (/^https?:\/\//i.test(url)) map[name.toLowerCase()] = url;
+  }
+  return map;
+}
+
+function findImageForName(html, name) {
+  const s = String(html);
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp('<img[^>]+alt="[^"]*' + escaped + '[^"]*"[^>]*>', "i");
+  const tag = s.match(re);
+  if (!tag) return null;
+  const srcSet = (tag[0].match(/srcSet="([^"]+)/i) || [])[1];
+  const src = (tag[0].match(/src="([^"]+)"/i) || [])[1];
+  const url = (srcSet ? srcSet.split(/\s+/)[0] : src) || "";
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+async function splitIntoCharacters(pageText, signal) {
+  const SPLIT_SYS = 'You are a character card parser. Given content about a story, plot, or cast, return ONLY valid JSON in this shape: {"plot": {"title": string, "tagline": string (short), "scenario": string (the shared setting/situation), "intro": string (the opening scene exactly as provided, written as one or more [Name] blocks - [Name] on its own line followed by that character\'s opening lines, and [Narrator] for narration; omit if the source has no opening scene)}, "characters": [{"name": string, "tagline": string (short, 3-6 words), "description": string (detailed persona/backstory), "personality": string (comma-separated traits), "attitude": string (one line on how this character acts toward the user), "appearance": string}]}. Split into separate entries ONLY when the content describes genuinely distinct named characters. If it is one persona (even with aliases or alternate forms), return a single character. Never include the user or reader-protagonist placeholder as a character. 1-8 characters. Preserve all facts; do not invent new ones. No markdown fences, no extra text.';
+  const text = await Provider.complete([{ role: "user", content: "Source content:\n" + pageText }], { system: SPLIT_SYS, temperature: 0.4, signal });
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
+
+function sceneOpeningHtml(blocks) {
+  return blocks
+    .map((b) => {
+      const c = b.characterId ? characters.find((x) => x.id === b.characterId) : null;
+      const av = b.narrator
+        ? `<div class="av av-narrator">${UI.fa("book-open")}</div>`
+        : avatarHtml(c, "");
+      return `<div class="msg opening-msg"><div class="av-wrap">${av}</div>
+        <div class="bubble"><div class="who">${esc(b.name)}</div><div class="body">${formatText(b.content)}</div></div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function handleSplitResult(split, opts = {}) {
+  const chars = (split.characters || []).filter((c) => c && (c.name || c.description));
+  if (!chars.length) throw new Error("No characters found on the page");
+  if (chars.length === 1) {
+    let one = chars[0];
+    one.scenario = one.scenario || (split.plot && split.plot.scenario) || "";
+    one.tagline = one.tagline || (split.plot && split.plot.tagline) || "";
+    if (split.plot && split.plot.intro && !(one.first_mes || "").trim()) {
+      one.first_mes = String(split.plot.intro).trim();
+    }
+    if (opts.convCb && opts.convCb.checked && needsPfrpFill(one)) {
+      one = await fillPfrpFields(Object.assign({ name: one.name, description: one.description }, one), opts.signal);
+    }
+    let avatarDataUrl = opts.avatarDataUrl || "";
+    if (!avatarDataUrl && opts.pageHtml) {
+      const imgMap = extractCharacterImages(opts.pageHtml);
+      const url = imgMap[(one.name || "").toLowerCase()] || findImageForName(opts.pageHtml, one.name);
+      if (url) {
+        try {
+          avatarDataUrl = await fetchImageAsDataUrl(url, opts.signal);
+        } catch {}
+      }
+    }
+    if (opts.overlay) opts.overlay.remove();
+    openCharacterEditor(avatarDataUrl ? Object.assign({}, one, { avatar: avatarDataUrl }) : one);
+  } else {
+    if (opts.overlay) opts.overlay.remove();
+    reviewSplitModal(split.plot || {}, chars, opts.pageHtml || "", opts.avatarDataUrl || "");
+  }
+}
+
+function reviewSplitModal(plot, chars, pageHtml = "", coverUrl = "") {
+  const imgMap = extractCharacterImages(pageHtml || "");
+  const wrap = UI.el("div", "");
+  wrap.appendChild(UI.el("p", "modal-desc", `This looks like ${chars.length} distinct characters${plot && plot.title ? ' in "' + esc(plot.title) + '"' : ""}. Import them as separate characters, or keep everything as one?`));
+  const list = UI.el("div", "folder-pick");
+  for (const c of chars) {
+    const url = imgMap[(c.name || "").toLowerCase()] || findImageForName(pageHtml || "", c.name || "");
+    const row = UI.el("div", "frow split-row");
+    const av = UI.el("div", "av split-av", c.name ? c.name[0].toUpperCase() : "?");
+    if (url) av.innerHTML = `<img src="${esc(url)}" alt="">`;
+    row.appendChild(av);
+    const body = UI.el("div", "split-info");
+    body.appendChild(UI.el("b", "", esc(c.name || "Unnamed")));
+    body.appendChild(UI.el("span", "hint", esc(String(c.personality || c.attitude || c.description || "").slice(0, 110))));
+    row.appendChild(body);
+    list.appendChild(row);
+  }
+  wrap.appendChild(list);
+  const act = UI.el("div", "modal-actions");
+  const cancel = UI.el("button", "btn ghost", "Cancel");
+  cancel.addEventListener("click", () => overlay.remove());
+  const asOne = UI.el("button", "btn", UI.fa("user") + " Keep as one");
+  asOne.addEventListener("click", () => {
+    const merged = {
+      name: (plot && plot.title) || (chars[0] && chars[0].name) || "Unnamed",
+      tagline: (plot && plot.tagline) || "",
+      description: [plot && plot.scenario, ...chars.map((c) => (c.name || "?") + ": " + (c.description || c.personality || "")), plot && plot.intro ? "Opening scene:\n" + plot.intro : ""].filter(Boolean).join("\n\n"),
+      scenario: (plot && plot.scenario) || "",
+    };
+    overlay.remove();
+    openCharacterEditor(merged);
+  });
+  const importBtn = UI.el("button", "btn primary", UI.fa("user-group") + " Import as " + chars.length + " characters");
+  importBtn.addEventListener("click", async () => {
+    const ids = [];
+    for (const c of chars) {
+      let avatar = "";
+      const url = imgMap[(c.name || "").toLowerCase()] || findImageForName(pageHtml || "", c.name || "");
+      if (url) {
+        try {
+          avatar = await fetchImageAsDataUrl(url, null);
+        } catch (e) {
+          console.warn("[URL] avatar fetch failed for " + c.name + ": " + (e && e.message));
+        }
+      }
+      const id = await pfrpDB.add("characters", {
+        name: c.name || "Unnamed",
+        tagline: c.tagline || "",
+        description: c.description || "",
+        personality: c.personality || "",
+        attitude: c.attitude || "",
+        appearance: c.appearance || "",
+        scenario: (plot && plot.scenario) || c.scenario || "",
+        explicitness: pfrpSettings.data.nsfw.chatDefault,
+        tags: [],
+        avatar,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      ids.push(id);
+    }
+    overlay.remove();
+    await loadData();
+    UI.showToast("Imported " + chars.length + " characters");
+    if (plot && plot.scenario) {
+      let sceneAvatar = "";
+      if (coverUrl) {
+        try {
+          sceneAvatar = await fetchImageAsDataUrl(coverUrl, null);
+        } catch (e) {
+          console.warn("[URL] scene cover fetch failed: " + (e && e.message));
+        }
+      }
+      const preview = UI.el("div", "panel-card");
+      preview.appendChild(UI.el("h4", "", `${UI.fa("film")} ${esc(plot.title || "Untitled scene")}`));
+      if (plot.tagline) preview.appendChild(UI.el("div", "field", `<b>Tagline</b><br>${esc(plot.tagline)}`));
+      preview.appendChild(UI.el("div", "field", `<b>Scenario</b><br>${esc(plot.scenario)}`));
+      preview.appendChild(UI.el("div", "field", `<b>Characters</b><br>${esc(chars.map((c) => c.name).join(", "))}`));
+      const saveScene = await UI.confirmModal({
+        title: "Save this scene?",
+        message: "Save the scene below with these characters, so you can start chats from it later?",
+        confirmText: "Save scene",
+        danger: false,
+        extra: preview,
+      });
+      if (saveScene) {
+        await pfrpDB.add("scenes", {
+          name: plot.title || chars.map((c) => c.name).join(", "),
+          tagline: plot.tagline || "",
+          scenario: plot.scenario,
+          intro: plot.intro || "",
+          characterIds: ids,
+          avatar: sceneAvatar,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        await loadData();
+        UI.showToast("Scene saved");
+      }
+    }
+    const start = await UI.confirmModal({
+      title: "Start a group chat?",
+      message: "Start a group chat with these characters right away?",
+      confirmText: "Start chat",
+      danger: false,
+    });
+    if (start) {
+      await createGroupThread(ids, null);
+    } else {
+      setDrawer("chars");
+    }
+  });
+  act.append(cancel, asOne, importBtn);
+  wrap.appendChild(act);
+  const overlay = UI.openModal(wrap, {
+    title: "Multiple characters detected",
+    wide: true,
+    onBackdrop: async () => {
+      const ok = await UI.confirmModal({
+        title: "Close without importing?",
+        message: "Closing now discards the detected characters and scene.",
+        confirmText: "Discard",
+      });
+      if (ok) overlay.remove();
+    },
+  });
 }
 
 async function fillPfrpFields(rec, signal) {
@@ -3025,8 +3587,42 @@ function needsPfrpFill(rec) {
   );
 }
 
+let urlImportActive = false;
+let urlImportAbort = null;
+let importPill = null;
+
+function showImportPill(onRestore) {
+  if (importPill) return;
+  importPill = UI.el("div", "import-pill");
+  const label = UI.el("span", "", "Importing character from URL...");
+  const cancelBtn = UI.el("button", "iconbtn", UI.fa("xmark"));
+  cancelBtn.title = "Cancel import";
+  cancelBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (urlImportAbort) urlImportAbort.abort();
+  });
+  importPill.append(UI.el("span", "spinner"), label, cancelBtn);
+  importPill.title = "Click to restore the import dialog";
+  importPill.addEventListener("click", () => {
+    if (onRestore) onRestore();
+  });
+  document.body.appendChild(importPill);
+}
+
+function hideImportPill() {
+  if (importPill) {
+    importPill.remove();
+    importPill = null;
+  }
+}
+
+function endUrlImport() {
+  urlImportActive = false;
+  urlImportAbort = null;
+  hideImportPill();
+}
+
 function aiCharacterFromUrl() {
-  const PARSER_SYS = 'You are a character card parser. Given raw content from a web page about a character, return ONLY valid JSON with these fields: {"name": string, "tagline": string (short, 3-6 words), "description": string (detailed persona/backstory), "personality": string (comma-separated traits), "attitude": string (one line on how the character acts toward the user), "appearance": string, "scenario": string (a short setting/situation to start a roleplay), "first_mes": string (an opening message spoken by the character), "mes_example": string (one short example dialogue exchange)}. Preserve all facts from the input; do not invent new ones. No markdown fences, no extra text.';
   const wrap = UI.el("div", "");
   wrap.appendChild(UI.el("p", "modal-desc", "Paste a link to a fandom wiki page or a character card site. The AI reads the page and drafts the character for you to review and edit. Card sites are downloaded directly, including the character's image."));
   const inp = UI.el("input", "input");
@@ -3054,14 +3650,24 @@ function aiCharacterFromUrl() {
       UI.showToast("Paste the page content first", { type: "err" });
       return;
     }
+    if (urlImportActive) {
+      UI.showToast("A URL import is already running", { type: "err" });
+      return;
+    }
+    urlImportActive = true;
+    showImportPill(() => {
+      if (!overlay.isConnected) document.body.appendChild(overlay);
+    });
     pasteBtn.disabled = true;
-    status.textContent = "Building the character...";
+    status.textContent = "Finding the characters...";
+    const pAc = new AbortController();
+    urlImportAbort = pAc;
     try {
-      const out = await Provider.complete([{ role: "user", content: "Page content:\n" + text.slice(0, 12000) }], { system: PARSER_SYS, temperature: 0.4 });
-      const data = JSON.parse(out.replace(/```json|```/g, "").trim());
-      overlay.remove();
-      openCharacterEditor(data);
+      const split = await splitIntoCharacters(text.slice(0, 12000), pAc.signal);
+      endUrlImport();
+      await handleSplitResult(split, { overlay, signal: pAc.signal });
     } catch (e) {
+      endUrlImport();
       status.textContent = "Failed: " + e.message;
       pasteBtn.disabled = false;
     }
@@ -3072,6 +3678,11 @@ function aiCharacterFromUrl() {
   const row = UI.el("div", "modal-actions");
   const cancel = UI.el("button", "btn ghost", "Cancel");
   cancel.addEventListener("click", () => overlay.remove());
+  let ac = null;
+  let running = false;
+  const doMinimize = () => {
+    overlay.remove();
+  };
   const gen = UI.el("button", "btn primary", UI.fa("wand-magic-sparkles") + " Create character");
   gen.addEventListener("click", async () => {
     const url = inp.value.trim();
@@ -3079,11 +3690,21 @@ function aiCharacterFromUrl() {
       UI.showToast("Enter a valid URL starting with http(s)://", { type: "err" });
       return;
     }
+    if (urlImportActive) {
+      UI.showToast("A URL import is already running", { type: "err" });
+      return;
+    }
+    urlImportActive = true;
+    showImportPill(() => {
+      if (!overlay.isConnected) document.body.appendChild(overlay);
+    });
     gen.disabled = true;
+    running = true;
     gen.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Working...';
     status.textContent = "Looking for a character card...";
     try {
-      const ac = new AbortController();
+      ac = new AbortController();
+      urlImportAbort = ac;
 
       let cardRecord = null;
       for (const trySite of [tryAicharactercards, tryCharacterTavern, tryChub, tryJannyai]) {
@@ -3103,12 +3724,14 @@ function aiCharacterFromUrl() {
           cardRecord = await fillPfrpFields(cardRecord, ac.signal);
         }
         status.textContent = "Card found - opening the editor...";
+        endUrlImport();
         overlay.remove();
         openCharacterEditor(cardRecord);
         return;
       }
 
       let pageText = "";
+      let pageHtml = "";
       let imageUrl = null;
       let fields = null;
 
@@ -3125,6 +3748,7 @@ function aiCharacterFromUrl() {
       if (!pageText) {
         status.textContent = "Fetching the page...";
         const html = await fetchPageViaProxy(url, ac.signal);
+        pageHtml = html;
         const embedded = extractEmbeddedCharacter(html);
         if (embedded) {
           fields = {
@@ -3155,21 +3779,20 @@ function aiCharacterFromUrl() {
         }
       }
 
-      const sys = PARSER_SYS;
+      status.textContent = "Finding the characters...";
       const hint = fields ? "Known fields found on the page (keep and refine them):\n" + JSON.stringify(fields) + "\n\nPage content:\n" + pageText : "Page content:\n" + pageText;
-      status.textContent = "Building the character...";
-      const text = await Provider.complete([{ role: "user", content: hint }], { system: sys, temperature: 0.4 });
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      let data = JSON.parse(cleaned);
-      if (convCb.checked && needsPfrpFill(data)) {
-        status.textContent = "Filling in the PFRP fields...";
-        data = await fillPfrpFields(Object.assign({ name: data.name, description: data.description }, data), ac.signal);
-      }
-      overlay.remove();
-      openCharacterEditor(Object.assign({}, fields, data, avatarDataUrl ? { avatar: avatarDataUrl } : {}));
+      const split = await splitIntoCharacters(hint, ac.signal);
+      endUrlImport();
+      await handleSplitResult(split, { overlay, convCb, signal: ac.signal, avatarDataUrl, pageHtml });
     } catch (e) {
-      status.textContent = "Failed: " + e.message + "  -  this site may block automatic fetching. Set a URL fetch proxy in Settings > Connection, or paste the page content below.";
-      pasteCtn.style.display = "";
+      running = false;
+      endUrlImport();
+      if (overlay.isConnected) {
+        status.textContent = "Failed: " + e.message + "  -  this site may block automatic fetching. Set a URL fetch proxy in Settings > Connection, or paste the page content below.";
+        pasteCtn.style.display = "";
+      } else {
+        UI.showToast("URL import failed: " + e.message, { type: "err" });
+      }
       gen.disabled = false;
       gen.innerHTML = UI.fa("wand-magic-sparkles") + " Create character";
     }
@@ -3177,7 +3800,15 @@ function aiCharacterFromUrl() {
   row.append(cancel, gen);
   wrap.appendChild(row);
   wrap.appendChild(status);
-  const overlay = UI.openModal(wrap, { title: "Create character from URL", wide: true });
+  const overlay = UI.openModal(wrap, { title: "Create character from URL", wide: true, onBackdrop: doMinimize });
+  const head = overlay.querySelector(".modal-head");
+  const closeBtn = head.querySelector(".iconbtn");
+  const rightWrap = UI.el("div", "modal-head-right");
+  const minBtn = UI.el("button", "iconbtn", UI.fa("window-minimize"));
+  minBtn.title = "Minimize (the import continues in the background)";
+  minBtn.addEventListener("click", doMinimize);
+  rightWrap.append(minBtn, closeBtn);
+  head.appendChild(rightWrap);
   inp.focus();
 }
 
@@ -3199,11 +3830,15 @@ async function fetchWikiPage(url, signal) {
   try {
     const apiUrl = info.apiBase + "?action=parse&page=" + encodeURIComponent(info.page) + "&format=json&prop=text&redirects=1&origin=*";
     const res = await fetch(apiUrl, { signal });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn("[URL] wiki api failed: " + apiUrl + " -> " + res.status);
+      return null;
+    }
     const data = await res.json();
     if (data.error || !data.parse || !data.parse.text) return null;
     const pageText = stripHtmlToText(data.parse.text["*"]).slice(0, 12000);
     if (!pageText) return null;
+    console.log("[URL] wiki page fetched: " + url + " (" + pageText.length + " chars)");
     let imageUrl = null;
     try {
       const title = data.parse.title || info.page;
@@ -3217,9 +3852,12 @@ async function fetchWikiPage(url, signal) {
           break;
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn("[URL] wiki image lookup failed: " + (e && e.message));
+    }
     return { text: pageText, imageUrl };
-  } catch {
+  } catch (e) {
+    console.warn("[URL] wiki fetch failed for " + url + ": " + (e && e.message));
     return null;
   }
 }
@@ -3236,43 +3874,57 @@ function extractImageUrl(html) {
 }
 
 async function fetchBlobViaProxy(url, signal) {
+  const attempts = [];
   if (corsFriendlyHost(url)) {
     try {
       const direct = await fetch(url, { signal });
+      attempts.push("direct:" + direct.status);
       if (direct.ok) {
         const blob = await direct.blob();
         if (blob && blob.size > 40) return blob;
       }
-    } catch {}
+    } catch (e) {
+      attempts.push("direct:" + (e && e.name));
+    }
   }
   const custom = (pfrpSettings.data.urlProxy || "").trim();
   if (custom) {
     try {
       const res = await fetch(custom + encodeURIComponent(url), { signal });
+      attempts.push("custom:" + res.status);
       if (res.ok) {
         const blob = await res.blob();
         if (blob && blob.size > 40) return blob;
       }
-    } catch {}
-  }
-  const proxies = [
-    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
-    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
-  ];
-  let lastErr = null;
-  for (const p of proxies) {
-    try {
-      const res = await fetch(p(url), { signal });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const blob = await res.blob();
-      if (blob && blob.size > 40) return blob;
-      throw new Error("Empty response");
     } catch (e) {
-      lastErr = e;
+      attempts.push("custom:" + (e && e.name));
     }
   }
-  throw lastErr || new Error("Could not fetch the file");
+  const proxies = [
+    ["corsproxy", (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u)],
+    ["allorigins", (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)],
+    ["codetabs", (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)],
+  ];
+  let lastErr = null;
+  for (const [name, p] of proxies) {
+    try {
+      const res = await fetch(p(url), { signal });
+      attempts.push(name + ":" + res.status);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      if (blob && blob.size > 40) {
+        console.log("[URL] blob via " + name + ": " + url + " (" + blob.size + " bytes)");
+        return blob;
+      }
+      throw new Error("empty");
+    } catch (e) {
+      lastErr = e;
+      console.warn("[URL] " + name + " failed for " + url + ": " + (e && e.message));
+    }
+  }
+  const detail = new Error("all fetch routes failed (" + attempts.join(", ") + ")");
+  console.warn("[URL] giving up on " + url + "  -  " + attempts.join(", "));
+  throw detail;
 }
 
 function blobToDataUrl(blob) {
@@ -3304,29 +3956,37 @@ async function cardRecordFromBlob(blob, name) {
 }
 
 async function fetchJsonViaProxy(url, signal) {
+  const attempts = [];
   const custom = (pfrpSettings.data.urlProxy || "").trim();
   if (custom) {
     try {
       const res = await fetch(custom + encodeURIComponent(url), { signal });
+      attempts.push("custom:" + res.status);
       if (res.ok) return await res.json();
-    } catch {}
+    } catch (e) {
+      attempts.push("custom:" + (e && e.name));
+    }
   }
   const proxies = [
-    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
-    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+    ["corsproxy", (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u)],
+    ["allorigins", (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)],
+    ["codetabs", (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)],
   ];
   let lastErr = null;
-  for (const p of proxies) {
+  for (const [name, p] of proxies) {
     try {
       const res = await fetch(p(url), { signal });
+      attempts.push(name + ":" + res.status);
       if (!res.ok) throw new Error("HTTP " + res.status);
       return await res.json();
     } catch (e) {
       lastErr = e;
+      console.warn("[URL] " + name + " failed for " + url + ": " + (e && e.message));
     }
   }
-  throw lastErr || new Error("Could not fetch the data");
+  const detail = new Error("all fetch routes failed (" + attempts.join(", ") + ")");
+  console.warn("[URL] giving up on " + url + "  -  " + attempts.join(", "));
+  throw detail;
 }
 
 async function tryAicharactercards(url, signal) {
@@ -3738,6 +4398,7 @@ async function loadData() {
   threads = await pfrpDB.getAll("threads");
   loreEntries = await pfrpDB.getAll("lore");
   imageRecords = await pfrpDB.getAll("images");
+  scenes = await pfrpDB.getAll("scenes");
   for (const t of threads) {
     const c = characters.find((x) => x.id === t.characterId);
     t.character = c;
@@ -3802,7 +4463,7 @@ function startChatChooser(c) {
   wrap.appendChild(UI.el("div", "spacer-h", ""));
   wrap.appendChild(choiceCard("comment", "Individual Chat", "Chat with " + esc(c.name), () => {
     overlay.remove();
-    startChatWithCharacter(c.id, pfrpSettings.data.activePersonaId);
+    sceneChooserModal([c.id], pfrpSettings.data.activePersonaId, false);
   }));
   wrap.appendChild(choiceCard("user-group", "Group chat", "Chat with " + esc(c.name) + " and others you pick", () => {
     overlay.remove();
@@ -3861,7 +4522,7 @@ function startGroupChat(primaryId) {
   create.disabled = selected.size === 0;
   create.addEventListener("click", () => {
     overlay.remove();
-    createGroupThread([...selected], pfrpSettings.data.activePersonaId);
+    sceneChooserModal([...selected], pfrpSettings.data.activePersonaId, true);
   });
   row.append(cancel, create);
   wrap.appendChild(row);
@@ -4023,6 +4684,11 @@ function renderCenter() {
   }
   if (activeCharacter) {
     renderCharacterView(activeCharacter);
+    updateComposerState();
+    return;
+  }
+  if (activeScene) {
+    renderSceneView(activeScene);
     updateComposerState();
     return;
   }
@@ -4589,6 +5255,7 @@ function basePromptParts(c) {
   if (conventions) parts.push(conventions);
   const t = activeThread;
   if (t) {
+    if (t.scenario) parts.push("Scene: " + t.scenario);
     if (t.summary) parts.push("Story so far (summary of earlier messages):\n" + t.summary);
     if (t.memory) parts.push("Chat memory (facts to remember):\n" + t.memory);
   }
@@ -5677,6 +6344,8 @@ function initEvents() {
       newLoreBook();
     } else if (d.create === "image") {
       openGenerateImageModal();
+    } else if (d.create === "scene") {
+      openSceneEditor(null);
     } else {
       UI.showToast(d.title + " creation coming in a later step");
     }

@@ -1,7 +1,7 @@
 "use strict";
 
 const DB_NAME = "pfrp";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 const DB_STORES = {
   characters: "++id, name, folderPath, createdAt, updatedAt",
@@ -10,6 +10,7 @@ const DB_STORES = {
   memories: "++id, threadId, type, index",
   lore: "++id, bookId, threadId, characterId, enabled",
   images: "++id, characterId, threadId, type, createdAt",
+  scenes: "++id, name, createdAt, updatedAt",
 };
 
 let _dbPromise = null;

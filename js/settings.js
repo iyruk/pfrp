@@ -35,6 +35,7 @@ const IMAGE_PROVIDERS = {
 };
 
 const THEMES = {
+  logo: { label: "Logo", accent1: "#b090d0", accent2: "#9070c0" },
   purple: { label: "Purple", accent1: "#a78bfa", accent2: "#d946ef" },
   pink: { label: "Pink", accent1: "#f472b6", accent2: "#fb7185" },
   blue: { label: "Ocean", accent1: "#60a5fa", accent2: "#22d3ee" },
@@ -161,7 +162,7 @@ const DEFAULT_SETTINGS = {
     chatDefault: "explicit",
     imageSafety: "explicit",
   },
-  theme: "purple",
+  theme: "logo",
   themeCustom: "#a78bfa",
   dark: true,
   avatarShape: "squircle",

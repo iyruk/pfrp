@@ -2,7 +2,7 @@
 
 const BACKUP_FORMAT = "pfrp-backup";
 const BACKUP_VERSION = 1;
-const BACKUP_STORES = ["characters", "threads", "messages", "memories", "lore", "images"];
+const BACKUP_STORES = ["characters", "threads", "messages", "memories", "lore", "images", "scenes"];
 
 async function exportBackup() {
   const data = {};

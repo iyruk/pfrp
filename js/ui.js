@@ -30,7 +30,12 @@ const UI = {
   },
 
   showTaskToast(label, onCancel) {
-    const host = document.getElementById("toasts") || (document.body.appendChild(UI.el("div", "toasts")));
+    let host = document.getElementById("toasts");
+    if (!host) {
+      host = UI.el("div", "toasts");
+      host.id = "toasts";
+      document.body.appendChild(host);
+    }
     const t = UI.el("div", "toast task");
     t.innerHTML = '<span class="spinner"></span><span class="label"></span>';
     t.querySelector(".label").textContent = label + " (click to stop)";
@@ -55,7 +60,7 @@ const UI = {
     setTimeout(() => hideToast(t), 1200);
   },
 
-  openModal(contentEl, { title = "", wide = false } = {}) {
+  openModal(contentEl, { title = "", wide = false, onBackdrop = null } = {}) {
     const overlay = UI.el("div", "modal-overlay");
     const modal = UI.el("div", "modal" + (wide ? " wide" : ""));
     const head = UI.el("div", "modal-head");
@@ -71,7 +76,10 @@ const UI = {
     contentEl.querySelectorAll(".modal-actions").forEach((row) => modal.appendChild(row));
     overlay.appendChild(modal);
     overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.remove();
+      if (e.target === overlay) {
+        if (onBackdrop) onBackdrop();
+        else overlay.remove();
+      }
     });
     document.body.appendChild(overlay);
     return overlay;

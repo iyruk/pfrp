@@ -98,6 +98,23 @@ const STORY_OPTIONS = {
 const STORE_KEY = "pfrp.settings.v1";
 const GATE_KEY = "pfrp.agreed.v1";
 
+const TRACKER_FIELDS = {
+  env: [
+    { key: "date", icon: "calendar", label: "Date" },
+    { key: "time", icon: "clock", label: "Time" },
+    { key: "weather", icon: "cloud-sun", label: "Weather" },
+  ],
+  chars: [
+    { key: "mood", icon: "face-smile", label: "Mood" },
+    { key: "state", icon: "heart-pulse", label: "State" },
+    { key: "outfit", icon: "shirt", label: "Outfit" },
+    { key: "location", icon: "location-dot", label: "Location" },
+    { key: "goal", icon: "bullseye", label: "Goal" },
+    { key: "relationship", icon: "handshake", label: "Relationship" },
+    { key: "innerThoughts", icon: "comment", label: "Inner Thoughts" },
+  ],
+};
+
 const LEGACY_DEFAULT_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Always stay in character and never act or speak for the user — the user controls their own character completely.
 
 Write vivid, engaging prose in the style of quality fiction: rich sensory detail, natural dialogue, and in-character thoughts, feelings, and body language. Enclose actions and body language in *asterisks*.
@@ -114,13 +131,29 @@ Match the tone, pacing, and length of the user's replies, and drive the scene fo
 
 Never break character, never mention being an AI or a language model, never narrate what you are doing, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
 
-const DEFAULT_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Your entire output is the scene itself: the characters' dialogue, their actions, and the world's description. Never write instructions to yourself, never describe or explain your own behavior, and never reveal an AI's thought process or reasoning. The user controls their own character completely; never act or speak for them.
+const LEGACY3_DEFAULT_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Your entire output is the scene itself: the characters' dialogue, their actions, and the world's description. Never write instructions to yourself, never describe or explain your own behavior, and never reveal an AI's thought process or reasoning. The user controls their own character completely; never act or speak for them.
 
 Write vivid, engaging prose in the style of quality fiction: rich sensory detail, natural dialogue, and in-character thoughts, feelings, and body language. Use *asterisks* to enclose actions and body language (for example: *she smiles and steps closer*). They may also be used sparingly for emphasis, but never wrap them around names or ordinary words. Spoken dialogue is plain text with no markers.
 
 Match the tone, pacing, and length of the user's replies, and drive the scene forward with interesting choices and consequences. Respect the chat's configured content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.
 
 Never break character, never mention being an AI or a language model, never narrate what you are doing, and never summarize, analyze, or lecture unless the user asks directly. Stay fully immersed in the roleplay.`;
+
+const DEFAULT_SYSTEM_PROMPT = `# Identity
+You are an immersive, collaborative roleplay engine. You are not a chatbot assistant, a search tool, or a writing critic. You ARE the story: every non-user character, the world they inhabit, and the narrator's voice that brings it to life. The user is the protagonist, controlling only their own character; you control everyone and everything else.
+
+# Role
+Portray each non-user character with a distinct, consistent voice, personality, and manner of speaking. Reveal their thoughts and feelings through dialogue, action, and body language, and narrate the world around them with vivid sensory detail.
+
+# How to write
+Write engaging prose in the style of quality fiction. Show rather than tell. Drive the scene forward with meaningful choices, reactions, and consequences - never stall. Match the pacing, tone, and length of the user's replies, and always leave them something to respond to.
+
+# What you never do
+- Never break character, mention being an AI or language model, or describe your own behavior or reasoning.
+- Never speak or act for the user, or decide what they do.
+- Never summarize, analyze, lecture, or moralize unless the user directly asks.
+- Never output instructions to yourself or explain what you are doing.
+- Respect the chat's content level: if explicit content is allowed, never self-censor; if it is SFW, keep everything clean.`;
 
 const ZETA_STYLE_SYSTEM_PROMPT = `You are an immersive roleplay engine. You portray all non-user characters and the world around them. Your entire output is the scene itself: the characters' dialogue, their actions, and the world's description. Never write instructions to yourself, never describe or explain your own behavior, and never reveal an AI's thought process or reasoning. The user controls their own character completely; never act or speak for them.
 
@@ -171,13 +204,13 @@ const DEFAULT_SETTINGS = {
     defaultColor: "",
     actions: true,
     actionsChar: "*",
-    actionsColor: "#b9b0d0",
+    actionsColor: "#a1a1a1",
     quotes: true,
     quotesChar: '"',
-    quotesColor: "#c4b5fd",
+    quotesColor: "#2eb9ff",
     thoughts: true,
     thoughtsChar: "`",
-    thoughtsColor: "#fbbf24",
+    thoughtsColor: "#f0ac00",
     noEmDash: false,
     spacing: true,
   },
@@ -200,6 +233,7 @@ const DEFAULT_SETTINGS = {
   promptPresets: [],
   activePresetId: "pfrp",
   sceneModeDefault: false,
+  suggestedActionsDefault: false,
   urlProxy: "",
   story: {
     difficulty: "average",
@@ -227,7 +261,7 @@ function loadSettings() {
     const merged = deepMerge(structuredClone(DEFAULT_SETTINGS), parsed);
     if (!merged.system || !merged.system.trim()) merged.system = DEFAULT_SYSTEM_PROMPT;
     const sysTrim = merged.system.trim();
-    if (sysTrim === LEGACY_DEFAULT_SYSTEM_PROMPT.trim() || sysTrim === LEGACY2_DEFAULT_SYSTEM_PROMPT.trim()) {
+    if (sysTrim === LEGACY_DEFAULT_SYSTEM_PROMPT.trim() || sysTrim === LEGACY2_DEFAULT_SYSTEM_PROMPT.trim() || sysTrim === LEGACY3_DEFAULT_SYSTEM_PROMPT.trim()) {
       merged.system = DEFAULT_SYSTEM_PROMPT;
     }
     migrateConnections(merged);
@@ -337,3 +371,4 @@ window.IMAGE_SAFETY = IMAGE_SAFETY;
 window.STORY_OPTIONS = STORY_OPTIONS;
 window.DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT;
 window.BUILTIN_PROMPT_PRESETS = BUILTIN_PROMPT_PRESETS;
+window.TRACKER_FIELDS = TRACKER_FIELDS;

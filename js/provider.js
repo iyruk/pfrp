@@ -26,6 +26,14 @@ const Provider = {
     return pfrpSettings.getProvider();
   },
 
+  isConfigured(conn) {
+    return pfrpSettings.isConfigured(conn);
+  },
+
+  isImageConfigured() {
+    return pfrpSettings.isImageConfigured();
+  },
+
   async requestJson(path, options) {
     const res = await fetch(this.baseUrl() + path, options);
     if (!res.ok) {
@@ -45,8 +53,9 @@ const Provider = {
   buildBody(messages, { stream = false, system, temperature, model, max_tokens, extra = {} } = {}) {
     const s = pfrpSettings.data;
     const conn = this.connection();
+    const preset = PROVIDERS[conn.provider] || PROVIDERS.openrouter;
     const body = {
-      model: model || conn.model,
+      model: model || conn.model || preset.defaultModel || "",
       messages,
       temperature: temperature != null ? temperature : s.temperature,
       stream,
@@ -87,6 +96,11 @@ const Provider = {
   },
 
   async *stream(messages, opts = {}) {
+    if (!this.isConfigured()) {
+      const conn = this.connection();
+      const preset = PROVIDERS[conn.provider] || PROVIDERS.openrouter;
+      throw new Error(`AI provider "${preset.label}" is not configured. Please add an API key in Settings > Connection.`);
+    }
     const body = this.buildBody(messages, { ...opts, stream: true });
     const url = this.baseUrl() + "/chat/completions";
     logRequest("chat (stream)", body, url);
@@ -139,6 +153,11 @@ const Provider = {
   },
 
   async complete(messages, opts = {}) {
+    if (!this.isConfigured()) {
+      const conn = this.connection();
+      const preset = PROVIDERS[conn.provider] || PROVIDERS.openrouter;
+      throw new Error(`AI provider "${preset.label}" is not configured. Please add an API key in Settings > Connection.`);
+    }
     const body = this.buildBody(messages, { ...opts, stream: false });
     const url = this.baseUrl() + "/chat/completions";
     logRequest("complete", body, url);
@@ -167,6 +186,10 @@ const Provider = {
     const img = pfrpSettings.data.images || {};
     const p = provider || img.provider || "pollinations";
     const key = apiKey != null ? apiKey : img.apiKey || "";
+    const preset = IMAGE_PROVIDERS[p];
+    if (preset && preset.needsKey && !key.trim()) {
+      throw new Error(`Image provider "${preset.label}" requires an API key. Configure it in Settings > Images or switch to Pollinations (free).`);
+    }
     if (p === "pollinations") {
       const url = "https://image.pollinations.ai/prompt/" + encodeURIComponent(prompt) + "?width=" + width + "&height=" + height + "&nologo=true";
       return { url };

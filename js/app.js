@@ -77,8 +77,35 @@ function isGenerating(threadId) {
   return streams.has(threadId);
 }
 
+function isProviderConfigured(conn) {
+  return Provider.isConfigured(conn);
+}
+
+function ensureProviderConfigured(actionName = "use this feature") {
+  if (isProviderConfigured()) return true;
+  const conn = pfrpSettings.activeConnection();
+  const preset = PROVIDERS[conn.provider] || PROVIDERS.openrouter;
+
+  const wrap = UI.el("div", "");
+  wrap.appendChild(UI.el("p", "modal-desc", `An AI connection is required before ${actionName}. Please configure your API key or connection details in Settings > Connection.`));
+
+  const act = UI.el("div", "modal-actions");
+  const cancel = UI.el("button", "btn ghost", "Cancel");
+  const openSet = UI.el("button", "btn primary", `${UI.fa("gear")} Open Settings`);
+  cancel.addEventListener("click", () => overlay.remove());
+  openSet.addEventListener("click", () => {
+    overlay.remove();
+    openSettingsModal();
+    if (typeof settingsShowTab === "function") settingsShowTab("conn");
+  });
+  act.append(cancel, openSet);
+  wrap.appendChild(act);
+  const overlay = UI.openModal(wrap, { title: "AI Connection Required" });
+  return false;
+}
+
 function currentThreadModel() {
-  return (activeThread && activeThread.modelName) || pfrpSettings.activeConnection().model;
+  return (activeThread && activeThread.modelName) || pfrpSettings.activeConnection().model || (PROVIDERS[pfrpSettings.activeConnection().provider] || PROVIDERS.openrouter).defaultModel || "";
 }
 
 function rememberModel(model) {
@@ -227,6 +254,11 @@ function invalidateModelCache() {
 }
 
 async function loadModelCache() {
+  if (!isProviderConfigured()) {
+    modelCache = [];
+    modelCacheFor = null;
+    return;
+  }
   const connId = pfrpSettings.activeConnection().id;
   try {
     const data = await Provider.listModels();
@@ -355,10 +387,110 @@ function initWelcome() {
     return;
   }
   els.welcomeOverlay.style.display = "flex";
+
+  const conn = pfrpSettings.activeConnection();
+  const provEl = $("welcomeProvider");
+  const modelEl = $("welcomeModel");
+  const keyEl = $("welcomeApiKey");
+  const keyToggle = $("welcomeKeyToggle");
+  const keyLink = $("welcomeKeyLink");
+  const keyWrap = $("welcomeKeyWrap");
+  const urlEl = $("welcomeBaseUrl");
+  const urlWrap = $("welcomeUrlWrap");
+  const urlHint = $("welcomeUrlHint");
+  const testBtn = $("welcomeTestBtn");
+  const testStatus = $("welcomeTestStatus");
+
+  if (provEl) provEl.value = conn.provider || "openrouter";
+  if (modelEl) modelEl.value = conn.model || "";
+  if (keyEl) keyEl.value = conn.apiKey || "";
+  if (urlEl) urlEl.value = conn.baseUrl || "";
+
+  const KEY_LINKS = {
+    openrouter: { url: "https://openrouter.ai/keys", label: "Get OpenRouter key" },
+    openai: { url: "https://platform.openai.com/api-keys", label: "Get OpenAI key" },
+    nanogpt: { url: "https://nano-gpt.com", label: "Get NanoGPT key" },
+  };
+
+  const URL_HINTS = {
+    ollama: "Set OLLAMA_ORIGINS=\"*\" (or rp.iyruk.com) on your machine for browser access.",
+    nanogpt: "NanoGPT requires an API key from nano-gpt.com.",
+  };
+
+  function updateWelcomeProviderUI() {
+    if (!provEl) return;
+    const p = provEl.value;
+    const preset = PROVIDERS[p] || PROVIDERS.openrouter;
+    const needsKey = preset.needsKey;
+    if (keyWrap) keyWrap.style.display = needsKey ? "" : "none";
+    if (keyLink) {
+      if (KEY_LINKS[p]) {
+        keyLink.href = KEY_LINKS[p].url;
+        keyLink.innerHTML = `${KEY_LINKS[p].label} <i class="fa-solid fa-arrow-up-right-from-square"></i>`;
+        keyLink.style.display = "";
+      } else {
+        keyLink.style.display = "none";
+      }
+    }
+    if (urlWrap) urlWrap.style.display = p === "ollama" ? "" : "none";
+    if (urlEl) urlEl.placeholder = preset.baseUrl || "";
+    if (urlHint) urlHint.textContent = URL_HINTS[p] || "";
+    if (modelEl) modelEl.placeholder = preset.defaultModel || "";
+  }
+
+  if (provEl) {
+    provEl.addEventListener("change", updateWelcomeProviderUI);
+    updateWelcomeProviderUI();
+  }
+
+  if (keyToggle && keyEl) {
+    keyToggle.addEventListener("click", () => {
+      const isPass = keyEl.type === "password";
+      keyEl.type = isPass ? "text" : "password";
+      keyToggle.innerHTML = `<i class="fa-solid fa-${isPass ? "eye-slash" : "eye"}"></i>`;
+    });
+  }
+
+  function applyWelcomeToConn() {
+    const c = pfrpSettings.activeConnection();
+    if (provEl) c.provider = provEl.value;
+    if (keyEl) c.apiKey = keyEl.value.trim();
+    if (modelEl) c.model = modelEl.value.trim();
+    if (urlEl) c.baseUrl = urlEl.value.trim();
+    return c;
+  }
+
+  if (testBtn) {
+    testBtn.addEventListener("click", async () => {
+      applyWelcomeToConn();
+      if (!isProviderConfigured()) {
+        testStatus.textContent = "Please enter an API key first.";
+        testStatus.style.color = "var(--danger)";
+        return;
+      }
+      testBtn.disabled = true;
+      testStatus.textContent = "Testing connection…";
+      testStatus.style.color = "";
+      try {
+        const data = await Provider.ping();
+        const reply = data.choices?.[0]?.message?.content || "Connected";
+        testStatus.textContent = "Connected! " + reply.trim().slice(0, 30);
+        testStatus.style.color = "var(--ok)";
+      } catch (e) {
+        testStatus.textContent = "Connection failed: " + e.message;
+        testStatus.style.color = "var(--danger)";
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+  }
+
   els.welcomeRefuse.addEventListener("click", () => {
     document.body.innerHTML = "<div style='display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-dim)'>You must be 18 or older to use this application.</div>";
   });
+
   els.welcomeContinue.addEventListener("click", () => {
+    applyWelcomeToConn();
     const name = els.welcomeName.value.trim() || "You";
     const desc = els.welcomeDesc.value.trim();
     const personas = pfrpSettings.data.personas || [];
@@ -376,13 +508,24 @@ function initWelcome() {
     pfrpSettings.save();
     pfrpSettings.setGatePassed();
     els.welcomeOverlay.remove();
-    UI.showToast("Welcome to Purple's RP, " + name);
+    if (isProviderConfigured()) {
+      UI.showToast("Welcome to Purple's RP, " + name);
+    } else {
+      UI.showToast("Welcome! Tip: Add an API key in Settings > Connection to chat.", { duration: 6000 });
+    }
   });
+
   els.welcomeGen.addEventListener("click", async () => {
+    applyWelcomeToConn();
     const name = els.welcomeName.value.trim();
     const hint = els.welcomeDesc.value.trim();
     if (!name) {
       UI.showToast("Enter your name first", { type: "err" });
+      return;
+    }
+    if (!isProviderConfigured()) {
+      UI.showToast("Please enter an API key in Step 2 first", { type: "err" });
+      if (keyEl) keyEl.focus();
       return;
     }
     els.welcomeGen.disabled = true;
@@ -425,6 +568,11 @@ function applyAvatarShape() {
   const shape = pfrpSettings.data.avatarShape || "circle";
   document.documentElement.dataset.avatarShape = ["circle", "square", "squircle"].includes(shape) ? shape : "circle";
 }
+function applyCompactMode() {
+  const compact = !!(pfrpSettings.data.ui && pfrpSettings.data.ui.compactChat);
+  if (compact) document.documentElement.dataset.compact = "1";
+  else delete document.documentElement.dataset.compact;
+}
 function hexToRgba(hex, a) {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
@@ -447,7 +595,8 @@ function setDrawer(key) {
   prevDrawer = key;
   activeDrawer = key;
   contextChar = null;
-  closeCtxPanelVisual();
+  if (key === "chats") closeCtxPanelVisual();
+  else setCtx(false);
   els.ctxToggle.style.display = key === "chats" ? "" : "none";
   document.querySelectorAll(".rail-btn[data-drawer]").forEach((b) => {
     b.classList.toggle("active", b.dataset.drawer === key);
@@ -863,6 +1012,12 @@ function openGenerateImageModal() {
   let generatedRec = null;
 
   generate.addEventListener("click", async () => {
+    if (!Provider.isImageConfigured()) {
+      UI.showToast("Please configure an API key for your Image Provider in Settings > Images, or switch to Pollinations (free).", { type: "err" });
+      openSettingsModal();
+      if (typeof settingsShowTab === "function") settingsShowTab("img");
+      return;
+    }
     const prompt = promptIn.value.trim();
     if (!prompt) {
       UI.showToast("Describe the image first", { type: "err" });
@@ -1506,6 +1661,7 @@ async function runSummary(t, toSummarize) {
 async function maybeSummarize(t) {
   const mem = pfrpSettings.data.memory || {};
   if (mem.autoSummarize === false) return;
+  if (!isProviderConfigured()) return;
   if (!t || summarizingThreads.has(t.id)) return;
   const sinceOrder = t.summarizedUpToOrder == null ? -1 : t.summarizedUpToOrder;
   const eligible = activeMessages.filter((m) => (m.role === "user" || m.role === "assistant") && m.order > sinceOrder);
@@ -1516,6 +1672,7 @@ async function maybeSummarize(t) {
 }
 
 async function summarizeNow(t) {
+  if (!ensureProviderConfigured("summarizing the chat")) return;
   if (!t || summarizingThreads.has(t.id)) return;
   t.summarizedUpToOrder = 0;
   const toSummarize = summarySlice(t);
@@ -1633,6 +1790,7 @@ function editPersonaModal(p) {
   descLabelRow.appendChild(UI.el("label", "field-label", "Description"));
   const genBtn = UI.el("button", "btn ghost small", UI.fa("wand-magic-sparkles") + " Generate with AI");
   genBtn.addEventListener("click", async () => {
+    if (!ensureProviderConfigured("generating a persona with AI")) return;
     genBtn.disabled = true;
     const n = name.value.trim() || "you";
     const guide = desc.value.trim();
@@ -2498,6 +2656,18 @@ function buildThemeSettings() {
     applyTheme();
   });
   wrap.appendChild(modeRow);
+
+  const compactRow = UI.el("div", "rowline");
+  compactRow.appendChild(UI.el("span", "", "Compact chat"));
+  const compactSw = UI.el("div", "switch" + (s.ui.compactChat ? " on" : ""));
+  compactRow.appendChild(compactSw);
+  compactSw.addEventListener("click", () => {
+    s.ui.compactChat = !s.ui.compactChat;
+    compactSw.classList.toggle("on", s.ui.compactChat);
+    pfrpSettings.save();
+    applyCompactMode();
+  });
+  wrap.appendChild(compactRow);
   wrap.appendChild(UI.el("div", "spacer-h", ""));
 
   wrap.appendChild(UI.el("label", "field-label", "Profile image shape"));
@@ -2988,6 +3158,7 @@ function openCharacterEditor(c = {}) {
     btn.appendChild(UI.el("i", "fa-solid fa-wand-magic-sparkles"));
     btn.title = "Generate this field with AI, using the other details as context";
     btn.addEventListener("click", async () => {
+      if (!ensureProviderConfigured("generating character fields with AI")) return;
       btn.disabled = true;
       btn.innerHTML = "";
       btn.appendChild(UI.el("i", "fa-solid fa-circle-notch fa-spin"));
@@ -3660,6 +3831,7 @@ function aiCharacterFromUrl() {
       UI.showToast("Paste the page content first", { type: "err" });
       return;
     }
+    if (!ensureProviderConfigured("parsing characters with AI")) return;
     if (urlImportActive) {
       UI.showToast("A URL import is already running", { type: "err" });
       return;
@@ -3700,6 +3872,7 @@ function aiCharacterFromUrl() {
       UI.showToast("Enter a valid URL starting with http(s)://", { type: "err" });
       return;
     }
+    if (!ensureProviderConfigured("importing characters from URL with AI")) return;
     if (urlImportActive) {
       UI.showToast("A URL import is already running", { type: "err" });
       return;
@@ -4130,6 +4303,7 @@ function aiGenerateCharacter() {
   cancel.addEventListener("click", () => overlay.remove());
   const gen = UI.el("button", "btn primary", UI.fa("wand-magic-sparkles") + " Generate");
   gen.addEventListener("click", async () => {
+    if (!ensureProviderConfigured("generating a character with AI")) return;
     const idea = ta.value.trim();
     if (!idea) {
       UI.showToast("Describe the character first", { type: "err" });
@@ -4197,7 +4371,11 @@ async function cancelConversion(id) {
 function promptConvertChoice(name) {
   return new Promise((resolve) => {
     const wrap = UI.el("div", "");
-    wrap.appendChild(UI.el("p", "modal-desc", "\"" + esc(name) + "\" has everything in a single description. Convert it to PFRP format? The AI reads the description and fills the structured fields (personality, appearance, scenario, first message, example dialogue). The original text stays in the description either way."));
+    const configured = isProviderConfigured();
+    const hintText = configured
+      ? ""
+      : "<br><br><span class='hint' style='color:var(--warn);'><i class='fa-solid fa-triangle-exclamation'></i> AI provider is not configured. Configure an API key in Settings > Connection to use AI conversion, or import as-is.</span>";
+    wrap.appendChild(UI.el("p", "modal-desc", "\"" + esc(name) + "\" has everything in a single description. Convert it to PFRP format? The AI reads the description and fills the structured fields (personality, appearance, scenario, first message, example dialogue). The original text stays in the description either way." + hintText));
     const applyAll = UI.el("label", "checkbox-row", "");
     const cb = UI.el("input", "");
     cb.type = "checkbox";
@@ -4207,7 +4385,10 @@ function promptConvertChoice(name) {
     const convertBtn = UI.el("button", "btn primary", "Convert to PFRP");
     const asIs = UI.el("button", "btn", "Import As-is");
     const done = (v) => { overlay.remove(); resolve({ choice: v, applyAll: cb.checked }); };
-    convertBtn.addEventListener("click", () => done("convert"));
+    convertBtn.addEventListener("click", () => {
+      if (!ensureProviderConfigured("converting character cards with AI")) return;
+      done("convert");
+    });
     asIs.addEventListener("click", () => done("asis"));
     actions.append(convertBtn, asIs);
     wrap.appendChild(actions);
@@ -4951,8 +5132,20 @@ function roleLabel(m) {
   return "Assistant";
 }
 
+function consecutiveAssistantAfter(m) {
+  if (!m || m.role !== "user") return [];
+  const idx = activeMessages.indexOf(m);
+  if (idx < 0) return [];
+  const out = [];
+  for (let i = idx + 1; i < activeMessages.length; i++) {
+    const n = activeMessages[i];
+    if (n.role === "user") break;
+    if (n.role === "assistant") out.push(n);
+  }
+  return out;
+}
+
 function renderMessage(m) {
-  const row = UI.el("div", "msg " + (m.role === "user" ? "user" : ""));
   const isScene = !!(m.blocks && m.blocks.length);
   let c = characters.find((x) => x.id === m.characterId);
   if (isScene && !c) {
@@ -4960,6 +5153,8 @@ function renderMessage(m) {
     c = firstChar ? characters.find((x) => x.id === firstChar.characterId) : null;
   }
   const clickable = m.role !== "user" && c;
+  const isNarratorMsg = m.narrator === true || (m.narrator == null && (m.name === "Narrator" || (m.characterId == null && !c && m.role === "assistant")));
+  const row = UI.el("div", "msg " + (m.role === "user" ? "user" : "") + (isNarratorMsg ? " narrator" : ""));
   if (m._loading) {
     const bubble = UI.el("div", "bubble streaming");
     const body = UI.el("div", "body");
@@ -4968,14 +5163,13 @@ function renderMessage(m) {
     row.appendChild(bubble);
     return row;
   }
-  const isNarratorMsg = m.narrator === true || (m.narrator == null && (m.name === "Narrator" || (m.characterId == null && !c && m.role === "assistant")));
   if (m.role === "user") {
     const userAv = UI.el("div", "");
     userAv.innerHTML = userAvatarHtml();
     row.appendChild(userAv);
   } else if (isNarratorMsg) {
     const navAv = UI.el("div", "av av-narrator");
-    navAv.innerHTML = UI.fa("book-open");
+    navAv.innerHTML = UI.fa("feather");
     row.appendChild(navAv);
   } else {
     const avWrap = UI.el("div", "");
@@ -4986,10 +5180,10 @@ function renderMessage(m) {
     }
     row.appendChild(avWrap);
   }
-  const bubble = UI.el("div", "bubble" + (m.isStreaming ? " streaming" : ""));
-  const who = UI.el("span", "who" + (clickable ? " who-click" : ""), roleLabel(m));
-  if (isScene) who.style.display = "none";
-  if (clickable) who.addEventListener("click", () => setContextChar(c.id));
+  const bubble = UI.el("div", (isNarratorMsg ? "narration" : "bubble") + (m.isStreaming && !isNarratorMsg ? " streaming" : ""));
+  const who = isNarratorMsg ? null : UI.el("span", "who" + (clickable ? " who-click" : ""), roleLabel(m));
+  if (who && isScene) who.style.display = "none";
+  if (who && clickable) who.addEventListener("click", () => setContextChar(c.id));
   const body = UI.el("div", "body");
   if (isScene) {
     if (m.isStreaming && !m.content) {
@@ -5012,7 +5206,8 @@ function renderMessage(m) {
   if (!m.isStreaming) {
     body.addEventListener("dblclick", () => inlineEdit(m, body));
   }
-  bubble.append(who, body);
+  if (who) bubble.append(who, body);
+  else bubble.appendChild(body);
   row.appendChild(bubble);
 
   const actions = UI.el("div", "msg-actions");
@@ -5026,10 +5221,24 @@ function renderMessage(m) {
     const del = UI.el("button", "iconbtn", UI.fa("trash"));
     del.title = "Delete message";
     del.addEventListener("click", async () => {
-      const ok = await UI.confirmModal({ title: "Delete message?", message: "This message will be permanently removed from the chat.", confirmText: "Delete" });
+      const related = consecutiveAssistantAfter(m);
+      let alsoDelete = related.length > 0;
+      let extra = null;
+      if (related.length) {
+        const wrap = UI.el("div", "checkbox-row");
+        const cb = UI.el("input", "");
+        cb.type = "checkbox";
+        cb.checked = true;
+        cb.addEventListener("change", () => { alsoDelete = cb.checked; });
+        wrap.append(cb, UI.el("span", "", `Also delete the ${related.length} generated response${related.length === 1 ? "" : "s"}`));
+        extra = wrap;
+      }
+      const ok = await UI.confirmModal({ title: "Delete message?", message: "This message will be permanently removed from the chat.", confirmText: "Delete", extra });
       if (!ok) return;
-      if (m.id) await pfrpDB.del("messages", m.id);
-      activeMessages = activeMessages.filter((x) => x !== m);
+      const remove = new Set(related);
+      remove.add(m);
+      for (const x of remove) if (x.id) await pfrpDB.del("messages", x.id);
+      activeMessages = activeMessages.filter((x) => !remove.has(x));
       renderAllMessages();
       UI.showToast("Message deleted");
     });
@@ -5458,6 +5667,7 @@ async function updateTracker(t) {
   const tt = threads.find((x) => x.id === t.id) || t;
   const enabledKeys = TRACKER_FIELDS.env.concat(TRACKER_FIELDS.chars).map((f) => f.key).filter((k) => trackerEnabled(tt, k));
   if (!enabledKeys.length) return;
+  if (!isProviderConfigured()) return;
   if (trackingThreads.has(tt.id)) return;
   if (!currentThreadModel()) return;
   trackingThreads.add(tt.id);
@@ -5496,6 +5706,7 @@ async function updateTracker(t) {
 async function generateSuggestedActions(t) {
   const tt = threads.find((x) => x.id === t.id) || t;
   if (!tt.suggestedActions) return;
+  if (!isProviderConfigured()) return;
   if (!currentThreadModel()) return;
   try {
     const recent = (activeMessages || []).filter((m) => !m._live && (m.role === "user" || m.role === "assistant")).slice(-10)
@@ -6128,6 +6339,7 @@ function mergeConsecutiveBlocks(blocks) {
 }
 
 async function regenerateScene(t, m) {
+  if (!ensureProviderConfigured("regenerating a scene")) return;
   const regenerateSingle = m.characterId != null || m.name === "Narrator";
   const prevContent = m.content;
   m.isStreaming = true;
@@ -6198,6 +6410,9 @@ async function sendMessage() {
     UI.showToast("Open or create a chat first", { type: "err" });
     return;
   }
+  if (!ensureProviderConfigured("sending a message")) {
+    return;
+  }
   if (isGenerating(t.id)) {
     UI.showToast("A response is already generating in this chat", { type: "err" });
     return;
@@ -6250,10 +6465,11 @@ async function sendMessage() {
     return;
   }
 
+  const orderBase = userMsg.order + 1;
   if (t.sceneMode) {
-    await generateScene(t, userMsg.order + 1);
+    await generateScene(t, orderBase);
   } else {
-    await generateResponse(t, speaker, { orderBase: userMsg.order + 1 });
+    await generateResponse(t, speaker, { orderBase });
 
     if (t.isGroup && t.autoRespond !== false && t.multiTurn !== false && t.pendingSpeaker == null) {
       let count = 1;
@@ -6281,6 +6497,7 @@ async function sendMessage() {
 async function regenerate(m) {
   const t = activeThread;
   if (!t) return;
+  if (!ensureProviderConfigured("regenerating a response")) return;
   if (m.role !== "assistant" || m._live) return;
   if (isGenerating(t.id)) {
     UI.showToast("A response is already generating in this chat", { type: "err" });
@@ -6389,7 +6606,8 @@ function updateComposerState() {
 function inlineEdit(m, body) {
   const ta = UI.el("textarea", "inline-edit");
   ta.value = m.content;
-  ta.style.height = "auto";
+  const prevW = body.clientWidth || 0;
+  const prevH = body.clientHeight || 0;
   body.innerHTML = "";
   body.appendChild(ta);
   const row = UI.el("div", "inline-edit-actions");
@@ -6398,7 +6616,10 @@ function inlineEdit(m, body) {
   row.append(saveBtn, cancelBtn);
   body.appendChild(row);
   ta.focus();
-  ta.style.height = Math.max(60, Math.min(ta.scrollHeight, 300)) + "px";
+  if (prevW) ta.style.width = Math.max(160, prevW) + "px";
+  const targetH = Math.max(40, prevH || 60);
+  ta.style.height = "auto";
+  ta.style.height = Math.max(targetH, Math.min(ta.scrollHeight, 360)) + "px";
   const cancel = () => renderAllMessages();
   cancelBtn.addEventListener("click", cancel);
   saveBtn.addEventListener("click", async () => {
@@ -6626,13 +6847,18 @@ function renderContextCharacter(wrap, c, t) {
 function trackerFieldInput(t, scope, key, value, label, icon, charId) {
   const g = UI.el("div", "tracker-field");
   g.appendChild(UI.el("label", "field-label", `${UI.fa(icon)} ${label}`));
-  const input = UI.el("input", "input");
-  input.type = "text";
+  const input = UI.el("textarea", "input tracker-field-ta");
+  input.rows = 1;
   input.value = value || "";
   input.placeholder = "Not set yet";
   g.appendChild(input);
+  const autoGrow = () => {
+    input.style.height = "auto";
+    input.style.height = Math.max(38, input.scrollHeight) + "px";
+  };
   let timer = null;
   input.addEventListener("input", () => {
+    autoGrow();
     clearTimeout(timer);
     timer = setTimeout(async () => {
       const tr = ensureTracker(t);
@@ -6646,6 +6872,7 @@ function trackerFieldInput(t, scope, key, value, label, icon, charId) {
       await pfrpDB.put("threads", t);
     }, 500);
   });
+  requestAnimationFrame(autoGrow);
   return g;
 }
 
@@ -7132,6 +7359,7 @@ function isMobileWidth() {
 async function init() {
   initWelcome();
   applyTheme();
+  applyCompactMode();
   renderCenter();
   renderContext();
   await loadData();

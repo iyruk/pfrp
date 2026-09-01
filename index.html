@@ -90,7 +90,7 @@
   <input type="file" id="importInput" accept=".png,.json,image/png,application/json" multiple style="display:none">
   <div class="drop-overlay" id="dropOverlay"><div class="drop-inner"><i class="fa-solid fa-file-import"></i><p>Drop character cards to import</p></div></div>
 
-  <!-- WELCOME / 18+ -->
+  <!-- WELCOME / NEW USER SETUP / 18+ -->
   <div class="modal-overlay" id="welcomeOverlay" style="display:none">
     <div class="modal welcome">
       <div class="modal-body">
@@ -98,24 +98,78 @@
           <div class="gate-icon"><i class="fa-solid fa-masks-theater"></i></div>
           <h2>Welcome to Purple's RP</h2>
           <div class="welcome-features">
-            <p>Roleplay with AI characters  -  Individual or group chats, with a narrator for scene-setting and characters that talk among themselves.</p>
-            <p>Import character cards from SillyTavern, Agnai, or Perchance. Everything stays in your browser.</p>
+            <p>Roleplay with AI characters — individual or group chats, a narrator for rich scene-setting, and private browser storage.</p>
           </div>
-          <div class="welcome-persona">
-            <label class="field-label" for="welcomeName">What should we call you?</label>
-            <input id="welcomeName" class="input" type="text" placeholder="Your name">
-            <label class="field-label" for="welcomeDesc">Briefly describe yourself (optional)</label>
-            <textarea id="welcomeDesc" class="textarea" rows="3" placeholder="Who are you in these stories? Personality, style, anything the characters should know…"></textarea>
-            <div class="modal-actions">
-              <button class="btn ghost small" id="welcomeGen"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate with AI</button>
+
+          <!-- STEP 1: PERSONA -->
+          <div class="welcome-section">
+            <div class="welcome-sec-title"><i class="fa-solid fa-circle-user"></i> 1. Your Persona</div>
+            <div class="welcome-persona">
+              <label class="field-label" for="welcomeName">What should we call you?</label>
+              <input id="welcomeName" class="input" type="text" placeholder="Your name (e.g. You)">
+              <label class="field-label" for="welcomeDesc">Briefly describe yourself (optional)</label>
+              <textarea id="welcomeDesc" class="textarea" rows="2" placeholder="Who are you in these stories? Personality, style, anything the characters should know…"></textarea>
+              <div class="modal-actions">
+                <button class="btn ghost small" id="welcomeGen"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate with AI</button>
+              </div>
+              <div class="hint">The generator uses what you've written above as a guide, or describes you on its own if empty.</div>
             </div>
-            <div class="hint">The generator uses what you've written above as a guide. Leave the box empty and it will describe you on its own.</div>
           </div>
-          <p class="hint">Purple's RP can generate uncensored adult content, including explicit 18+ roleplay and imagery. By continuing you confirm you are at least 18 and that viewing this content is legal where you are.</p>
-          <div class="modal-actions center">
-            <button class="btn primary" id="welcomeContinue"><i class="fa-solid fa-check"></i> I am 18 or older  -  Continue</button>
-            <button class="btn ghost" id="welcomeRefuse">I am not 18</button>
+
+          <!-- STEP 2: AI PROVIDER SETUP -->
+          <div class="welcome-section">
+            <div class="welcome-sec-title"><i class="fa-solid fa-plug"></i> 2. Connect Your AI Provider</div>
+            <div class="welcome-provider-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="field-label" for="welcomeProvider">Provider</label>
+                  <select id="welcomeProvider" class="select">
+                    <option value="openrouter">OpenRouter (Recommended)</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="ollama">Ollama (local)</option>
+                    <option value="nanogpt">NanoGPT</option>
+                  </select>
+                </div>
+                <div class="form-group" id="welcomeModelGroup">
+                  <label class="field-label" for="welcomeModel">Default Model</label>
+                  <input id="welcomeModel" class="input" type="text" placeholder="openai/gpt-4o-mini">
+                </div>
+              </div>
+
+              <div class="form-group" id="welcomeKeyWrap">
+                <div class="sys-label-row">
+                  <label class="field-label" for="welcomeApiKey">API Key</label>
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener" class="hint-link" id="welcomeKeyLink">Get OpenRouter key <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                </div>
+                <div class="key-row">
+                  <input id="welcomeApiKey" class="input" type="password" placeholder="sk-or-v1-..." autocomplete="off">
+                  <button type="button" class="btn ghost iconbtn" id="welcomeKeyToggle" title="Show/hide key"><i class="fa-solid fa-eye"></i></button>
+                </div>
+              </div>
+
+              <div class="form-group" id="welcomeUrlWrap" style="display:none">
+                <label class="field-label" for="welcomeBaseUrl">Base URL</label>
+                <input id="welcomeBaseUrl" class="input" type="text" placeholder="http://localhost:11434/v1">
+                <div class="hint" id="welcomeUrlHint"></div>
+              </div>
+
+              <div class="welcome-test-row">
+                <button type="button" class="btn ghost small" id="welcomeTestBtn"><i class="fa-solid fa-bolt"></i> Test Connection</button>
+                <span class="hint" id="welcomeTestStatus"></span>
+              </div>
+              <div class="hint" style="margin-top: 8px;">You can change connections, add multiple providers, or switch models anytime in Settings.</div>
+            </div>
           </div>
+
+          <!-- STEP 3: AGE CONFIRMATION -->
+          <div class="welcome-section welcome-age">
+            <p class="hint">Purple's RP can generate uncensored adult content, including explicit 18+ roleplay and imagery. By continuing you confirm you are at least 18 and that viewing this content is legal where you are.</p>
+            <div class="modal-actions center">
+              <button class="btn primary" id="welcomeContinue"><i class="fa-solid fa-check"></i> I am 18 or older  -  Continue</button>
+              <button class="btn ghost" id="welcomeRefuse">I am not 18</button>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

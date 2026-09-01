@@ -220,6 +220,7 @@ const DEFAULT_SETTINGS = {
     lastDrawer: "chats",
     lastOpen: {},
     ctxWidth: 310,
+    compactChat: false,
   },
   user: {
     name: "You",
@@ -354,6 +355,26 @@ const Settings = {
   },
   setGatePassed() {
     localStorage.setItem(GATE_KEY, "1");
+  },
+
+  isConfigured(conn) {
+    const c = conn || this.activeConnection();
+    if (!c) return false;
+    const preset = PROVIDERS[c.provider] || PROVIDERS.openrouter;
+    if (preset && preset.needsKey) {
+      return typeof c.apiKey === "string" && c.apiKey.trim().length > 0;
+    }
+    return true;
+  },
+
+  isImageConfigured() {
+    const img = this.data.images || {};
+    const p = img.provider || "pollinations";
+    const preset = IMAGE_PROVIDERS[p];
+    if (preset && preset.needsKey) {
+      return typeof img.apiKey === "string" && img.apiKey.trim().length > 0;
+    }
+    return true;
   },
 
   explicitnessLabel(v) {

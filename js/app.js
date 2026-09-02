@@ -2180,7 +2180,6 @@ function buildConnectionSettings() {
   save.addEventListener("click", () => {
     const prevProvider = currentConn().provider;
     applyToConn();
-    s.system = sys.value;
     pfrpSettings.save();
     if (currentConn().provider !== prevProvider) invalidateModelCache();
     refreshConnSelect();

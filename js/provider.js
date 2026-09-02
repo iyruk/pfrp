@@ -68,11 +68,51 @@ const Provider = {
     return body;
   },
 
+  _getPerchanceAi() {
+    if (typeof root !== "undefined" && typeof root.ai === "function") return root.ai;
+    if (typeof window.parent !== "undefined" && window.parent.root && typeof window.parent.root.ai === "function") return window.parent.root.ai;
+    return null;
+  },
+
+  _getPerchanceT2i() {
+    if (typeof root !== "undefined" && typeof root.t2i === "function") return root.t2i;
+    if (typeof window.parent !== "undefined" && window.parent.root && typeof window.parent.root.t2i === "function") return window.parent.root.t2i;
+    return null;
+  },
+
+  _formatPerchancePrompt(messages, system) {
+    const parts = [];
+    if (system && system.trim()) {
+      parts.push("[System Instruction]:\n" + system.trim());
+    }
+    for (const m of messages) {
+      if (m.role === "system") {
+        parts.push("[System Instruction]:\n" + m.content);
+      } else if (m.role === "user") {
+        parts.push("User: " + m.content);
+      } else if (m.role === "assistant") {
+        const name = m.name ? m.name : "Assistant";
+        parts.push(name + ": " + m.content);
+      }
+    }
+    return parts.join("\n\n");
+  },
+
   async listModels() {
+    const conn = this.connection();
+    if (conn.provider === "perchance") {
+      return { data: [{ id: "default", name: "Perchance Default" }] };
+    }
     return this.requestJson("/models", { headers: this.headers() });
   },
 
   async ping() {
+    const conn = this.connection();
+    if (conn.provider === "perchance") {
+      const ai = this._getPerchanceAi();
+      if (!ai) throw new Error("Perchance AI plugin is only available when running on Perchance.org");
+      return { ok: true, status: "Perchance AI ready" };
+    }
     const s = pfrpSettings.data;
     const body = this.buildBody(
       [{ role: "user", content: "Reply with exactly: PING OK" }],
@@ -101,6 +141,74 @@ const Provider = {
       const preset = PROVIDERS[conn.provider] || PROVIDERS.openrouter;
       throw new Error(`AI provider "${preset.label}" is not configured. Please add an API key in Settings > Connection.`);
     }
+    const conn = this.connection();
+    if (conn.provider === "perchance") {
+      const ai = this._getPerchanceAi();
+      if (!ai) {
+        throw new Error("Perchance AI plugin is only available when running on Perchance.org.");
+      }
+      const instruction = this._formatPerchancePrompt(messages, opts.system);
+      logRequest("chat (perchance stream)", { instruction }, "perchance:ai");
+      const queue = [];
+      let done = false;
+      let error = null;
+      let notify = null;
+
+      const push = (item) => {
+        queue.push(item);
+        if (notify) {
+          const fn = notify;
+          notify = null;
+          fn();
+        }
+      };
+
+      let streamObj = null;
+      try {
+        streamObj = ai({
+          instruction,
+          startWith: " ",
+          onChunk: (data) => {
+            if (data.textChunk) push({ choices: [{ delta: { content: data.textChunk } }] });
+          },
+          onFinish: (data) => {
+            done = true;
+            if (data.stopReason === "error") error = new Error("Perchance AI generation failed");
+            if (notify) {
+              const fn = notify;
+              notify = null;
+              fn();
+            }
+          },
+        });
+      } catch (e) {
+        throw new Error("Perchance AI invocation error: " + e.message);
+      }
+
+      if (opts.signal) {
+        opts.signal.addEventListener("abort", () => {
+          if (streamObj && typeof streamObj.stop === "function") streamObj.stop();
+        });
+      }
+
+      let full = "";
+      while (!done || queue.length > 0) {
+        if (queue.length > 0) {
+          const item = queue.shift();
+          const d = item.choices?.[0]?.delta?.content;
+          if (d) full += d;
+          yield item;
+        } else if (done) {
+          break;
+        } else {
+          await new Promise((r) => { notify = r; });
+        }
+      }
+      if (error) throw error;
+      logResponse(full);
+      return;
+    }
+
     const body = this.buildBody(messages, { ...opts, stream: true });
     const url = this.baseUrl() + "/chat/completions";
     logRequest("chat (stream)", body, url);
@@ -158,6 +266,40 @@ const Provider = {
       const preset = PROVIDERS[conn.provider] || PROVIDERS.openrouter;
       throw new Error(`AI provider "${preset.label}" is not configured. Please add an API key in Settings > Connection.`);
     }
+    const conn = this.connection();
+    if (conn.provider === "perchance") {
+      const ai = this._getPerchanceAi();
+      if (!ai) {
+        throw new Error("Perchance AI plugin is only available when running on Perchance.org.");
+      }
+      const instruction = this._formatPerchancePrompt(messages, opts.system);
+      logRequest("complete (perchance)", { instruction }, "perchance:ai");
+      return new Promise((resolve, reject) => {
+        let streamObj = null;
+        try {
+          streamObj = ai({
+            instruction,
+            startWith: " ",
+            onFinish: (data) => {
+              if (data.stopReason === "error") reject(new Error("Perchance AI generation failed"));
+              else {
+                logResponse(data.text || "");
+                resolve(data.text || "");
+              }
+            },
+          });
+        } catch (e) {
+          return reject(new Error("Perchance AI invocation error: " + e.message));
+        }
+        if (opts.signal) {
+          opts.signal.addEventListener("abort", () => {
+            if (streamObj && typeof streamObj.stop === "function") streamObj.stop();
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }
+      });
+    }
+
     const body = this.buildBody(messages, { ...opts, stream: false });
     const url = this.baseUrl() + "/chat/completions";
     logRequest("complete", body, url);
@@ -189,6 +331,30 @@ const Provider = {
     const preset = IMAGE_PROVIDERS[p];
     if (preset && preset.needsKey && !key.trim()) {
       throw new Error(`Image provider "${preset.label}" requires an API key. Configure it in Settings > Images or switch to Pollinations (free).`);
+    }
+    if (p === "perchance") {
+      const t2i = this._getPerchanceT2i();
+      if (!t2i) {
+        throw new Error("Perchance Image plugin is only available when running on Perchance.org.");
+      }
+      return new Promise((resolve, reject) => {
+        try {
+          t2i({
+            prompt,
+            onFinish: (result) => {
+              try {
+                const dataUrl = result.canvas ? result.canvas.toDataURL("image/jpeg") : (result.url || "");
+                if (!dataUrl) return reject(new Error("No image canvas returned from Perchance T2I"));
+                resolve({ url: dataUrl });
+              } catch (e) {
+                reject(new Error("Failed to extract Perchance image: " + e.message));
+              }
+            },
+          });
+        } catch (e) {
+          reject(new Error("Perchance T2I invocation error: " + e.message));
+        }
+      });
     }
     if (p === "pollinations") {
       const url = "https://image.pollinations.ai/prompt/" + encodeURIComponent(prompt) + "?width=" + width + "&height=" + height + "&nologo=true";

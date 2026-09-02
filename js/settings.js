@@ -13,6 +13,12 @@ const PROVIDERS = {
     needsKey: true,
     defaultModel: "gpt-4o-mini",
   },
+  perchance: {
+    label: "Perchance AI (free)",
+    baseUrl: "",
+    needsKey: false,
+    defaultModel: "default",
+  },
   ollama: {
     label: "Ollama (local)",
     baseUrl: "http://localhost:11434/v1",
@@ -32,6 +38,7 @@ const IMAGE_PROVIDERS = {
   openrouter: { label: "OpenRouter (t2i)", needsKey: true },
   stability: { label: "Stability AI", needsKey: true },
   pollinations: { label: "Pollinations (free)", needsKey: false },
+  perchance: { label: "Perchance Images (free)", needsKey: false },
 };
 
 const THEMES = {

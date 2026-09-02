@@ -1,0 +1,8 @@
+title = Purple's RP - Roleplay with AI Characters
+
+// Perchance Plugins
+ai = {import:ai-text-plugin}
+t2i = {import:text-to-image-plugin}
+icon = {import:fa-icon-plugin}
+
+$output = [root.htmlOutput || ""]
